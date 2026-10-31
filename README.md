@@ -28,6 +28,10 @@ Besides the built-in **Home Archive** (shown as "Made by The Courier"), Control 
 
 Sources can be switched off or removed, are included in Backup Vault snapshots, and are covered by Auto-Patch. F-Droid downloads are verified against the SHA-256 in the index, and your Access Key is only ever sent to api.github.com.
 
+## Suggested
+
+Under your modules on the Catalog page, a Suggested section offers the official F-Droid app. Its build comes from F-Droid's own signed index (the same checks as Archives), then goes to Android's installer; the button becomes OPEN, or UPDATE when a newer version exists. The home page never downloads the large index by surprise: until it has been synced once, the card shows INSTALL without a version, and on mobile data you are asked before the download. Once installed, F-Droid is patched by Auto-Patch like any other module. The section is hidden while searching or filtering.
+
 ## Archives
 
 The ARCHIVES tab lists large open-source repositories. F-Droid is built in; any F-Droid-style source you add also appears. Opening one gives the whole index A to Z with sticky letters and a letter rail, search, app icons, and filters: fits this device (CPU and Android version), hide anti-features, category, updated, and sort. Tick apps and tap ADD to put them in your catalog.
@@ -66,6 +70,14 @@ The one thing the GitHub target strictly needs is **Contents read and write on t
 - If the app can't create the repo with your key, it says so and tells you to create it by hand. I could not confirm from GitHub's docs whether fine-grained tokens are allowed to create personal repos, so treat creation as a convenience, not something to rely on.
 
 Known limits: Android will not install an older version over a newer one, so "as recorded" can't downgrade a module. Only modules installed through Stellarite Apps are recorded.
+
+## About other people's repositories
+
+Stellarite Apps was made mainly as a launcher for its maker's own apps. It is not an app store replacement.
+
+The F-Droid app repository belongs to the F-Droid project, and IzzyOnDroid's belongs to its maintainer. Stellarite Apps does not host, copy or change their apps. It only gives you a way into their public indexes from one place and downloads the APKs from their servers, checking signatures and checksums as described above. It is independent software and is not made by, affiliated with or endorsed by F-Droid or IzzyOnDroid. If you would rather use their official app, get F-Droid from https://f-droid.org.
+
+Stellarite Apps can install any APK from any source you add. It does not review third-party apps, so only add sources you trust. The software is provided as is, without warranty (see LICENSE).
 
 ## Auto-Patch details
 

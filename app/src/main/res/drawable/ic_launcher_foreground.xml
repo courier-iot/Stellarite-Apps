@@ -4,20 +4,29 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:strokeColor="#4DE8F4"
-        android:strokeWidth="3"
-        android:pathData="M45,54a9,9 0,1,0 18,0a9,9 0,1,0 -18,0" />
+    <!-- Stellarite crystal, scaled to sit inside the adaptive-icon safe zone. -->
     <group
         android:pivotX="54"
         android:pivotY="54"
-        android:rotation="-30">
+        android:scaleX="0.7"
+        android:scaleY="0.7">
+        <path android:fillColor="#33F2384F" android:pathData="M54,26a28,28 0,1,0 0.01,0z" />
+        <path android:fillColor="#0B1B22" android:pathData="M54,14L80,36L74,78L54,94L34,78L28,36Z" />
+        <path android:fillColor="#7DEFF8" android:pathData="M54,14L80,36L54,44Z" />
+        <path android:fillColor="#6FE6F2" android:pathData="M54,14L28,36L54,44Z" />
+        <path android:fillColor="#1B8E9B" android:pathData="M80,36L74,78L54,64L54,44Z" />
+        <path android:fillColor="#2CB5C3" android:pathData="M28,36L34,78L54,64L54,44Z" />
+        <path android:fillColor="#FF4A62" android:pathData="M54,64L74,78L54,94Z" />
+        <path android:fillColor="#C71F3A" android:pathData="M54,64L34,78L54,94Z" />
         <path
-            android:strokeColor="#4DE8F4"
-            android:strokeWidth="3"
-            android:pathData="M30,54a24,10 0,1,0 48,0a24,10 0,1,0 -48,0" />
+            android:strokeColor="#B3E6FDFF"
+            android:strokeWidth="1.2"
+            android:strokeLineJoin="round"
+            android:pathData="M54,14L80,36L74,78L54,94L34,78L28,36Z" />
+        <path
+            android:strokeColor="#73E6FDFF"
+            android:strokeWidth="0.8"
+            android:pathData="M54,44L54,64M28,36L54,44L80,36" />
     </group>
-    <path
-        android:fillColor="#F2384F"
-        android:pathData="M74,36.5a3.5,3.5 0,1,0 0.01,0z" />
+    <path android:strokeColor="#99E6E9EE" android:strokeWidth="0.8" android:pathData="M88,16v12M82,22h12" />
 </vector>

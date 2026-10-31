@@ -30,7 +30,7 @@ class PatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
         val client = GitHubClient()
 
         return try {
-            val found = Catalog(ctx, client, FDroidClient.withPrefs(prefs), prefs).load().apps
+            val found = Catalog(ctx, client, FDroidClient.withPrefs(prefs), prefs).load(withSuggested = true).apps
             for (app in found) {
                 val repo = app.repo
                 val release = app.release

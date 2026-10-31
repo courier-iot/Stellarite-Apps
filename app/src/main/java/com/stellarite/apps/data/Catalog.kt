@@ -25,7 +25,7 @@ class Catalog(
     private fun token(): String? = prefs.token.ifBlank { null }
 
     /** A failure in the main catalog is thrown; a failure in an extra source is reported but does not stop the rest. */
-    suspend fun load(): CatalogResult {
+    suspend fun load(withSuggested: Boolean = false, onlyIfInstalled: Boolean = true): CatalogResult {
         val found = LinkedHashMap<String, StoreApp>()
         val home = github.fetchApps(prefs.effectiveUser, token())
         home.forEach { found.putIfAbsent(it.first.fullName, toApp(it)) }
@@ -41,6 +41,19 @@ class Catalog(
                 throw e
             } catch (e: Exception) {
                 errors[s.id] = e.message ?: "Could not load this source"
+            }
+        }
+        if (withSuggested) {
+            for (sg in Suggestions.ALL) {
+                if (found.containsKey(sg.key)) continue
+                if (onlyIfInstalled && Installer.installedVersion(ctx, sg.pkg) == null) continue
+                try {
+                    suggestedApp(sg, allowDownload = true)?.let { found[sg.key] = it }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    errors[sg.key] = e.message ?: "Could not load ${sg.title}"
+                }
             }
         }
         return CatalogResult(found.values.toList(), home.size, counts, errors)
@@ -59,34 +72,48 @@ class Catalog(
         SourceType.FDROID -> fdroidApps(s)
     }
 
+    /**
+     * The newest build of a suggested app. Without [allowDownload] this only answers from an index that is
+     * already cached, so the home page never downloads a large index by surprise.
+     */
+    suspend fun suggestedApp(sg: Suggestion, allowDownload: Boolean): StoreApp? {
+        if (!allowDownload && (!fdroid.isFresh(sg.repoUrl, ctx.cacheDir) || fdroid.cachedMeta(sg.repoUrl, ctx.cacheDir) == null)) {
+            return null
+        }
+        val index = fdroid.indexFile(sg.repoUrl, ctx.cacheDir)
+        return fdroid.resolve(index, sg.repoUrl, setOf(sg.pkg)).firstOrNull()?.let { toFdroidApp(it, sg.repoUrl) }
+    }
+
     private suspend fun fdroidApps(s: Source): List<StoreApp> {
         if (s.picks.isEmpty()) return emptyList()
         val index = fdroid.indexFile(s.value, ctx.cacheDir)
-        val onFdroidOrg = s.value.substringAfter("://").substringBefore('/').endsWith("f-droid.org")
-        return fdroid.resolve(index, s.value, s.picks.toSet()).map { b ->
-            val key = FDROID_PREFIX + b.pkg
-            prefs.setPackage(key, b.pkg) // the index tells us the package up front
-            val asset = GhAsset(
-                id = b.versionCode,
-                name = b.apkUrl.substringAfterLast('/'),
-                size = b.size,
-                url = b.apkUrl,
-                browserDownloadUrl = b.apkUrl,
-                sha256 = b.sha256,
-            )
-            StoreApp(
-                repo = GhRepo(
-                    name = b.name,
-                    fullName = key,
-                    description = b.summary.ifBlank { null },
-                    htmlUrl = if (onFdroidOrg) "https://f-droid.org/packages/${b.pkg}" else s.value,
-                ),
-                release = GhRelease(tagName = b.versionName, name = b.versionName, assets = listOf(asset)),
-                apk = asset,
-                packageName = b.pkg,
-                installedVersion = null,
-                state = AppState.NOT_INSTALLED,
-            )
-        }
+        return fdroid.resolve(index, s.value, s.picks.toSet()).map { toFdroidApp(it, s.value) }
+    }
+
+    private fun toFdroidApp(b: FDroidBuild, repoUrl: String): StoreApp {
+        val onFdroidOrg = repoUrl.substringAfter("://").substringBefore('/').endsWith("f-droid.org")
+        val key = FDROID_PREFIX + b.pkg
+        prefs.setPackage(key, b.pkg) // the index tells us the package up front
+        val asset = GhAsset(
+            id = b.versionCode,
+            name = b.apkUrl.substringAfterLast('/'),
+            size = b.size,
+            url = b.apkUrl,
+            browserDownloadUrl = b.apkUrl,
+            sha256 = b.sha256,
+        )
+        return StoreApp(
+            repo = GhRepo(
+                name = b.name,
+                fullName = key,
+                description = b.summary.ifBlank { null },
+                htmlUrl = if (onFdroidOrg) "https://f-droid.org/packages/${b.pkg}" else repoUrl,
+            ),
+            release = GhRelease(tagName = b.versionName, name = b.versionName, assets = listOf(asset)),
+            apk = asset,
+            packageName = b.pkg,
+            installedVersion = null,
+            state = AppState.NOT_INSTALLED,
+        )
     }
 }

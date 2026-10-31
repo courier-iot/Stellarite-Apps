@@ -16,7 +16,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -46,7 +49,7 @@ fun ArchivesScreen(
 
         cards.forEach { card ->
             Column(
-                Modifier.fillMaxWidth().panel(border = SA.Accent).padding(16.dp),
+                Modifier.fillMaxWidth().panel(border = SA.Accent, accent = true).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -84,6 +87,33 @@ fun ArchivesScreen(
                 "and pick what joins your catalog. More archives can be added from Core > Sources.",
             color = SA.Muted, fontSize = 13.sp, lineHeight = 18.sp,
         )
+
+        val ctx = LocalContext.current
+        Column(
+            Modifier.fillMaxWidth().panel(border = SA.Line2).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SectionLabel("ABOUT THESE ARCHIVES")
+            Text(
+                "F-Droid's app repository belongs to the F-Droid project. Stellarite Apps only gives you a way " +
+                    "into it from your own launcher, which was made mainly for its maker's own apps. It is not " +
+                    "made by or affiliated with F-Droid and is not meant to replace their app store. " +
+                    "If you would rather use theirs, you can get the official F-Droid app.",
+                color = SA.Muted, fontSize = 13.sp, lineHeight = 19.sp,
+            )
+            SaButton(
+                "GET THE F-DROID APP",
+                {
+                    try {
+                        ctx.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } catch (e: Exception) {
+                    }
+                },
+                Modifier.fillMaxWidth(), BtnStyle.OutlineLight, height = 48.dp,
+            )
+        }
     }
 }
 

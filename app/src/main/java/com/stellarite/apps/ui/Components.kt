@@ -77,10 +77,19 @@ fun chamfer(cut: Dp): Shape = object : Shape {
  * Themed surface. Cyber: chamfered corners with a hairline border.
  * Steampunk: rounded, double brass border with a rivet in each corner.
  */
-fun Modifier.panel(border: Color = SA.CardLine, cut: Dp = 12.dp, fill: Color = SA.Panel): Modifier {
+fun Modifier.panel(border: Color = SA.CardLine, cut: Dp = 12.dp, fill: Color = SA.Panel, accent: Boolean = false): Modifier {
     if (!SA.isSteam) {
         val shape = chamfer(cut)
-        return this.clip(shape).background(fill, shape).border(1.dp, border, shape)
+        val base = this.clip(shape).background(fill, shape).border(1.dp, border, shape)
+        if (!accent) return base
+        // Cyber only: crimson along the cut corner, a glowing edge tick and a short bottom bar.
+        return base.drawBehind {
+            val w = size.width
+            val h = size.height
+            drawLine(SA.Update, Offset(w - cut.toPx(), 0f), Offset(w, cut.toPx()), 1.5.dp.toPx())
+            drawRect(SA.Update, Offset(0f, 14.dp.toPx()), Size(2.dp.toPx(), 22.dp.toPx()))
+            drawRect(SA.Update, Offset(w - 40.dp.toPx(), h - 2.dp.toPx()), Size(26.dp.toPx(), 2.dp.toPx()))
+        }
     }
     val shape = RoundedCornerShape(4.dp)
     return this
@@ -189,7 +198,14 @@ fun BrandLogo(size: Dp = 30.dp, modifier: Modifier = Modifier) {
 fun Wordmark(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        modifier = modifier,
+        modifier = if (SA.isSteam) modifier else modifier.drawBehind {
+            // Short crimson underline that fades out.
+            val y = size.height + 3.dp.toPx()
+            val t = 2.dp.toPx()
+            drawRect(SA.Update, Offset(0f, y), Size(26.dp.toPx(), t))
+            drawRect(SA.Update.copy(alpha = 0.5f), Offset(29.dp.toPx(), y), Size(6.dp.toPx(), t))
+            drawRect(SA.Update.copy(alpha = 0.25f), Offset(38.dp.toPx(), y), Size(3.dp.toPx(), t))
+        },
         color = SA.wordmark,
         style = TextStyle(
             fontFamily = SA.bodyFont,
@@ -293,7 +309,8 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
                 .height(1.dp)
                 .background(
                     Brush.horizontalGradient(
-                        listOf(if (SA.isSteam) SA.Line3 else Color(0xFF2F7983), SA.Line, Color.Transparent)
+                        if (SA.isSteam) listOf(SA.Line3, SA.Line, Color.Transparent)
+                        else listOf(SA.Update, Color(0xFF2F7983), SA.Line, Color.Transparent)
                     )
                 )
         )

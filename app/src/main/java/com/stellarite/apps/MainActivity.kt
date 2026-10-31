@@ -29,7 +29,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -226,6 +229,15 @@ private fun StellariteApp(vm: StoreViewModel) {
                     onFilter = vm::setFilter,
                     onOpen = { selected = it.repo.fullName },
                     onAction = ::act,
+                    onSuggested = { item ->
+                        val a = item.app
+                        when {
+                            a != null -> act(a)
+                            item.installed -> Installer.open(ctx, item.s.pkg)
+                            else -> vm.installSuggested(item)
+                        }
+                    },
+                    onOpenArchives = { tab = 1 },
                 )
             } else if (tab == 1) {
                 ArchivesScreen(
@@ -295,6 +307,23 @@ private fun StellariteApp(vm: StoreViewModel) {
         } else {
             Box(Modifier.navigationBarsPadding())
         }
+    }
+
+    state.suggestedPrompt?.let { p ->
+        AlertDialog(
+            onDismissRequest = vm::dismissSuggestedPrompt,
+            containerColor = SA.Nav,
+            title = { Text("Download the ${p.s.title} index?", color = SA.Text) },
+            text = {
+                Text(
+                    "You are not on Wi-Fi. ${p.s.title}'s index is large, so it will use a good amount of mobile data. " +
+                        "It is downloaded once and kept for a day.",
+                    color = SA.Muted,
+                )
+            },
+            confirmButton = { TextButton({ vm.installSuggested(p, confirmed = true) }) { Text("DOWNLOAD", color = SA.Accent) } },
+            dismissButton = { TextButton(vm::dismissSuggestedPrompt) { Text("WAIT FOR WI-FI", color = SA.Muted) } },
+        )
     }
 
     if (showRoster) {

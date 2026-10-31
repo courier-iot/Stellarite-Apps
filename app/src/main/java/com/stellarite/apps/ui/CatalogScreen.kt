@@ -71,6 +71,8 @@ fun CatalogScreen(
     onFilter: (Filter) -> Unit,
     onOpen: (StoreApp) -> Unit,
     onAction: (StoreApp) -> Unit,
+    onSuggested: (SuggestedItem) -> Unit,
+    onOpenArchives: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val q = state.query.trim()
@@ -119,6 +121,9 @@ fun CatalogScreen(
                         else -> "SYNCED · ${state.upToDate}/${state.apps.size} MODULES"
                     }
                     Mono(if (SA.isSteam) text.lowercase().replaceFirstChar { it.uppercase() } else text, spacing = 1.sp, maxLines = 1)
+                    if (!SA.isSteam && updates > 0 && !state.loading) {
+                        StatusChip("● $updates UPDATE${if (updates == 1) "" else "S"}", SA.Update)
+                    }
                 }
                 if (state.loading) {
                     LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = SA.Accent, trackColor = SA.Line)
@@ -191,6 +196,20 @@ fun CatalogScreen(
                 }
             }
         }
+
+        if (q.isEmpty() && state.filter == Filter.ALL && state.suggested.isNotEmpty()) {
+            item(key = "suggested-label") { SectionLabel("SUGGESTED", Modifier.padding(top = 6.dp)) }
+            items(state.suggested, key = { "suggested-" + it.s.key }) { s ->
+                SuggestedCard(s, state.transfers[s.s.key], onAction = { onSuggested(s) })
+            }
+            item(key = "suggested-note") {
+                Mono(
+                    "Prefer to browse their whole catalog from here? Open ARCHIVES.",
+                    Modifier.clickable(onClick = onOpenArchives).padding(vertical = 6.dp),
+                    spacing = 0.8.sp,
+                )
+            }
+        }
     }
 }
 
@@ -234,7 +253,7 @@ private fun AppCard(app: StoreApp, transfer: Transfer?, onOpen: () -> Unit, onAc
         AppState.NOT_INSTALLED -> listOf(tag, formatSize(app.apk.size)).filter { it.isNotEmpty() }.joinToString(" · ")
     }
     Row(
-        Modifier.fillMaxWidth().panel().clickable(onClick = onOpen).padding(14.dp),
+        Modifier.fillMaxWidth().panel(accent = true).clickable(onClick = onOpen).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {

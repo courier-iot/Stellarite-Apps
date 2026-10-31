@@ -25,6 +25,7 @@ import com.stellarite.apps.data.SourceLinks
 import com.stellarite.apps.data.SourceType
 import com.stellarite.apps.data.StoreApp
 import com.stellarite.apps.data.SyncStage
+import com.stellarite.apps.data.Suggestions
 import com.stellarite.apps.data.Transfer
 import com.stellarite.apps.data.Vault
 import com.stellarite.apps.data.statusOf
@@ -64,6 +65,8 @@ data class UiState(
     val sourceErrors: Map<String, String> = emptyMap(),
     val addSource: AddSourceUi? = null,
     val archive: ArchiveUi? = null,
+    val suggested: List<SuggestedItem> = emptyList(),
+    val suggestedPrompt: SuggestedItem? = null,
     val archives: List<ArchiveCard> = emptyList(),
 ) {
     /** Modules that are installed and on the latest release. */
@@ -145,6 +148,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                         sourceErrors = result.errors,
                     )
                 }
+                loadSuggested()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -155,7 +159,14 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Re-reads what is installed on the device (call when returning from the installer). */
     fun recheck() {
-        _state.update { s -> s.copy(apps = s.apps.map { withLocalState(it) }) }
+        _state.update { s ->
+            s.copy(
+                apps = s.apps.map { withLocalState(it) },
+                suggested = s.suggested.map { i ->
+                    i.copy(app = i.app?.let { a -> withLocalState(a) }, installed = Installer.installedVersion(ctx, i.s.pkg) != null)
+                },
+            )
+        }
         refreshRestoreStatus()
         maybeAutoSnapshot()
     }
@@ -423,6 +434,59 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         setSources(prefs.sources + src)
         closeAddSource()
         refresh()
+    }
+
+    // ---- Suggested: recommended apps on the home page ------------------------------------------
+
+    /** Shows what is known without touching the network; a large index is never downloaded by surprise. */
+    fun loadSuggested() {
+        viewModelScope.launch {
+            val items = Suggestions.ALL.map { sg ->
+                val app = try {
+                    catalog.suggestedApp(sg, allowDownload = false)?.let { withLocalState(it) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+                val old = _state.value.suggested.firstOrNull { it.s.key == sg.key }
+                SuggestedItem(
+                    sg, app ?: old?.app, old?.preparing ?: false,
+                    installed = Installer.installedVersion(ctx, sg.pkg) != null,
+                )
+            }
+            _state.update { it.copy(suggested = items) }
+        }
+    }
+
+    private fun updateSuggested(key: String, f: SuggestedItem.() -> SuggestedItem) =
+        _state.update { s -> s.copy(suggested = s.suggested.map { if (it.s.key == key) it.f() else it }) }
+
+    fun dismissSuggestedPrompt() = _state.update { it.copy(suggestedPrompt = null) }
+
+    /** Installs a suggested app that has no known build yet: reads the verified index first. */
+    fun installSuggested(item: SuggestedItem, confirmed: Boolean = false) {
+        val sg = item.s
+        if (jobs[sg.key]?.isActive == true || item.preparing) return
+        if (!confirmed && !fdroid.isFresh(sg.repoUrl, ctx.cacheDir) && isMetered()) {
+            _state.update { it.copy(suggestedPrompt = item) }
+            return
+        }
+        _state.update { it.copy(suggestedPrompt = null) }
+        updateSuggested(sg.key) { copy(preparing = true) }
+        viewModelScope.launch {
+            try {
+                val app = catalog.suggestedApp(sg, allowDownload = true)?.let { withLocalState(it) }
+                    ?: error("${sg.title} has no build for this device in the index.")
+                updateSuggested(sg.key) { copy(app = app, preparing = false) }
+                install(app)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateSuggested(sg.key) { copy(preparing = false) }
+                _state.update { it.copy(message = e.message ?: "Could not prepare ${sg.title}") }
+            }
+        }
     }
 
     // ---- Archives: browse a large F-Droid-style repository -------------------------------------
@@ -796,7 +860,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             val fdroidApps: Map<String, StoreApp> =
                 if (chosen.any { it.repo.startsWith(FDROID_PREFIX) }) {
                     try {
-                        catalog.load().apps.associateBy { it.repo.fullName }
+                        catalog.load(withSuggested = true, onlyIfInstalled = false).apps.associateBy { it.repo.fullName }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
