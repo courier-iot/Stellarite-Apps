@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +44,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.stellarite.apps.BuildConfig
 import com.stellarite.apps.Config
+import com.stellarite.apps.data.Source
+import com.stellarite.apps.data.SourceType
 import com.stellarite.apps.ui.theme.SA
 import com.stellarite.apps.ui.theme.ThemeId
 import java.text.SimpleDateFormat
@@ -51,6 +61,11 @@ fun SettingsScreen(
     rosterSummary: String,
     onAutoPatch: (Boolean) -> Unit,
     onOpenRoster: () -> Unit,
+    sources: SourcesPanel,
+    onSourceEnabled: (String, Boolean) -> Unit,
+    onSourceRemove: (String) -> Unit,
+    onSourceEdit: (Source) -> Unit,
+    onAddSource: () -> Unit,
     vault: VaultUi,
     onVaultTarget: (String) -> Unit,
     onAutoSnapshot: (Boolean) -> Unit,
@@ -88,7 +103,7 @@ fun SettingsScreen(
         Panel("UPLINK") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Mono("OPERATOR HANDLE (BLANK = HOME ARCHIVE)", spacing = 1.3.sp)
-                SaField(username, { username = it }, Modifier.fillMaxWidth(), placeholder = Config.DEFAULT_OWNER)
+                SaField(username, { username = it }, Modifier.fillMaxWidth(), placeholder = "Home Archive")
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Mono("ACCESS KEY (OPTIONAL)", spacing = 1.3.sp)
@@ -101,6 +116,8 @@ fun SettingsScreen(
                 )
             }
         }
+
+        SourcesSection(sources, onSourceEnabled, onSourceRemove, onSourceEdit, onAddSource)
 
         Panel("VISOR SKIN") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -147,6 +164,128 @@ fun SettingsScreen(
             Modifier.fillMaxWidth(),
             spacing = 1.4.sp,
         )
+    }
+}
+
+private fun iconOf(type: SourceType): ImageVector = when (type) {
+    SourceType.ACCOUNT -> Icons.Outlined.Person
+    SourceType.REPO -> Icons.Outlined.Folder
+    SourceType.STARS -> Icons.Outlined.StarBorder
+    SourceType.FDROID -> Icons.Outlined.Storage
+}
+
+private fun tagOf(type: SourceType): String = when (type) {
+    SourceType.ACCOUNT -> "ACCOUNT"
+    SourceType.REPO -> "REPO"
+    SourceType.STARS -> "STARS"
+    SourceType.FDROID -> "INDEX"
+}
+
+private fun modulesText(n: Int) = "$n ${if (n == 1) "MODULE" else "MODULES"}"
+
+@Composable
+private fun SourcesSection(
+    panel: SourcesPanel,
+    onEnabled: (String, Boolean) -> Unit,
+    onRemove: (String) -> Unit,
+    onEdit: (Source) -> Unit,
+    onAdd: () -> Unit,
+) {
+    Panel("SOURCES") {
+        SourceRow(
+            icon = Icons.Outlined.Person,
+            name = panel.homeTitle,
+            sub = panel.homeSub,
+            tag = "MAIN",
+            count = modulesText(panel.homeCount),
+            enabled = true,
+            home = true,
+        )
+        panel.sources.forEach { s ->
+            Divider()
+            SourceRow(
+                icon = iconOf(s.type),
+                name = s.label,
+                sub = when (s.type) {
+                    SourceType.ACCOUNT -> "github.com/${s.value}"
+                    SourceType.REPO -> "github.com/${s.value}"
+                    SourceType.STARS -> "needs your Access Key"
+                    SourceType.FDROID -> s.value.removePrefix("https://")
+                },
+                tag = tagOf(s.type),
+                count = when {
+                    !s.enabled -> "PAUSED"
+                    s.type == SourceType.FDROID -> "${s.picks.size} PICKED"
+                    else -> modulesText(panel.counts[s.id] ?: 0)
+                },
+                enabled = s.enabled,
+                error = panel.errors[s.id],
+                editLabel = if (s.type == SourceType.FDROID) "PICK APPS" else null,
+                onEdit = { onEdit(s) },
+                onRemove = { onRemove(s.id) },
+                onToggle = { onEnabled(s.id, it) },
+            )
+        }
+        SaButton("+ ADD SOURCE", onAdd, Modifier.fillMaxWidth(), BtnStyle.OutlineLight, height = 54.dp)
+        Text(
+            "Only add sources you trust. Stellarite installs whatever a source publishes, and Android only accepts updates signed with the same key.",
+            color = SA.Muted, fontSize = 13.sp, lineHeight = 18.sp,
+        )
+    }
+}
+
+@Composable
+private fun SourceRow(
+    icon: ImageVector,
+    name: String,
+    sub: String,
+    tag: String,
+    count: String,
+    enabled: Boolean,
+    home: Boolean = false,
+    error: String? = null,
+    editLabel: String? = null,
+    onEdit: () -> Unit = {},
+    onRemove: () -> Unit = {},
+    onToggle: ((Boolean) -> Unit)? = null,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .background(SA.Void, SA.tileShape)
+                .border(1.dp, if (SA.isSteam) SA.Line3 else SA.Line2, SA.tileShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = if (enabled) SA.Accent else SA.Muted, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(name, color = SA.Text, fontSize = if (SA.isSteam) 17.sp else 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Mono(sub, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusChip(tag, SA.Muted)
+                Mono(count, maxLines = 1)
+                if (home) StatusChip("HOME", SA.Installed)
+            }
+            if (!home) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (editLabel != null) {
+                        Mono(
+                            editLabel,
+                            Modifier.clickable(role = Role.Button, onClick = onEdit).padding(vertical = 10.dp),
+                            color = SA.Accent, weight = FontWeight.SemiBold,
+                        )
+                    }
+                    Mono(
+                        "REMOVE",
+                        Modifier.clickable(role = Role.Button, onClick = onRemove).padding(vertical = 10.dp),
+                        color = SA.Alert, weight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            if (error != null) Text(error, color = SA.Alert, fontSize = 13.sp, lineHeight = 18.sp)
+        }
+        if (onToggle != null) SaSwitch(enabled, onToggle, "Use $name")
     }
 }
 

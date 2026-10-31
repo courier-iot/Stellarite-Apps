@@ -8,6 +8,8 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.stellarite.apps.data.Catalog
+import com.stellarite.apps.data.FDroidClient
 import com.stellarite.apps.data.GitHubClient
 import com.stellarite.apps.data.InstallResult
 import com.stellarite.apps.data.Installer
@@ -28,15 +30,19 @@ class PatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
         val client = GitHubClient()
 
         return try {
-            val found = client.fetchApps(prefs.effectiveUser, token)
-            for ((repo, release, apk) in found) {
+            val found = Catalog(ctx, client, FDroidClient.withPrefs(prefs), prefs).load().apps
+            for (app in found) {
+                val repo = app.repo
+                val release = app.release
+                val apk = app.apk
                 if (!prefs.shouldAutoPatch(repo.fullName)) continue
                 // Only modules installed through Stellarite Apps are known by package name.
                 val pkg = prefs.packageFor(repo.fullName) ?: continue
                 val installed = Installer.installedVersion(ctx, pkg) ?: continue
                 if (Installer.sameVersion(installed, release.tagName)) continue
 
-                val file = File(ctx.cacheDir, "apks/${repo.fullName.replace('/', '_')}-${release.tagName}.apk")
+                val safeName = repo.fullName.replace('/', '_').replace(':', '_')
+                val file = File(ctx.cacheDir, "apks/$safeName-${release.tagName}.apk")
                 try {
                     client.download(apk, token, file) { }
                     val result = Installer.install(ctx, file, repo.name, background = true)

@@ -17,6 +17,23 @@ A repo appears when it is not a fork or archived, and its **latest release** has
 
 Tag your releases with the app's `versionName` (`v1.2.0` or `1.2.0` both work). Update detection compares the installed `versionName` against the latest tag. The status line reads `SYNCED · up-to-date/total MODULES`.
 
+## Sources
+
+Besides the built-in **Home Archive** (shown as "Made by The Courier"), Control Core > Sources lets you paste a link:
+
+- `github.com/owner` adds every qualifying repo of an account or org.
+- `github.com/owner/repo` adds one repo.
+- **Stars** adds your starred repos (first 100; needs an Access Key).
+- An F-Droid-style repo address (F-Droid, IzzyOnDroid, others) opens that archive (see Archives): only the apps you tick join the catalog.
+
+Sources can be switched off or removed, are included in Backup Vault snapshots, and are covered by Auto-Patch. F-Droid downloads are verified against the SHA-256 in the index, and your Access Key is only ever sent to api.github.com.
+
+## Archives
+
+The ARCHIVES tab lists large open-source repositories. F-Droid is built in; any F-Droid-style source you add also appears. Opening one gives the whole index A to Z with sticky letters and a letter rail, search, app icons, and filters: fits this device (CPU and Android version), hide anti-features, category, updated, and sort. Tick apps and tap ADD to put them in your catalog.
+
+On first open (or when the daily cache expires) the index is downloaded once. On mobile data you are asked first. The index is checked against the repository's signed `entry.jar` before use: F-Droid's signing key is built into the app; for other repos the key is remembered the first time and a change is refused. A repo with no signature file is usable but shown as UNSIGNED.
+
 ## Module detail and README
 
 Under the release notes, the detail screen pulls the repo's README live from GitHub and renders it (headings, lists, code, quotes, tables, links). Images and raw HTML are skipped, relative links point at the repo, and long READMEs are trimmed with an "Open full README on GitHub" button.
@@ -58,6 +75,9 @@ A background job runs about every 6 hours on a network connection. Installs go t
 
 - An app is only recognised as installed after it has been installed through Stellarite Apps once (the package name is read from the downloaded APK).
 - Updates only install over apps signed with the same key.
+- F-Droid modules cannot be downgraded. Index signature checking uses Android's JAR verifier; if a repo signs with an algorithm Android refuses, the sync fails rather than skipping the check.
+- Icons in Archives load from the repository over the network (via Coil).
+- Stars are capped at the first 100.
 - App icons are generic glyphs, since GitHub releases don't carry artwork.
 - Fonts are system fonts (monospace/sans for Cyber, serif for Steampunk); IBM Plex can be bundled later.
 

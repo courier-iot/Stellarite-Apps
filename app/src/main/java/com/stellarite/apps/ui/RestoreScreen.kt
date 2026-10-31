@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stellarite.apps.data.DeviceSnapshot
 import com.stellarite.apps.data.ModStatus
+import com.stellarite.apps.data.displayRepo
 import com.stellarite.apps.data.SnapModule
 import com.stellarite.apps.data.statusOf
 import com.stellarite.apps.ui.theme.SA
@@ -203,7 +204,7 @@ private fun ModuleRow(m: SnapModule, installed: String?, on: Boolean, enabled: B
         )
         Column(Modifier.weight(1f)) {
             Text(m.name, color = SA.Text, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            Mono("${m.repo} · ${m.version ?: "?"}", maxLines = 1)
+            Mono("${displayRepo(m.repo)} · ${m.version ?: "?"}", maxLines = 1)
         }
         StatusChip(label, color)
     }
@@ -224,6 +225,6 @@ private fun SettingsTick(on: Boolean, onChange: (Boolean) -> Unit) {
             onCheckedChange = null,
             colors = CheckboxDefaults.colors(checkedColor = SA.Accent, uncheckedColor = SA.Muted, checkmarkColor = SA.Void),
         )
-        Text("Also restore skin and Patch Roster", color = SA.Text, fontSize = 16.sp)
+        Text("Also restore skin, Patch Roster and sources", color = SA.Text, fontSize = 16.sp)
     }
 }

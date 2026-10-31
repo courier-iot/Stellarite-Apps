@@ -33,9 +33,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stellarite.apps.data.AppState
+import com.stellarite.apps.data.FDROID_PREFIX
 import com.stellarite.apps.data.ReadmeState
 import com.stellarite.apps.data.StoreApp
 import com.stellarite.apps.data.Transfer
+import com.stellarite.apps.data.displayRepo
 import com.stellarite.apps.ui.theme.SA
 
 private const val README_MAX_CHARS = 12_000
@@ -91,7 +93,7 @@ fun DetailScreen(
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(app.repo.name, color = SA.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-                Mono(app.repo.fullName, size = 12.sp, maxLines = 1)
+                Mono(displayRepo(app.repo.fullName), size = 12.sp, maxLines = 1)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Badge(tag, SA.Accent)
                     when {
@@ -132,7 +134,12 @@ fun DetailScreen(
                         }
                         else -> SaButton("OPEN", onOpenApp, Modifier.fillMaxWidth(), BtnStyle.Accent, height = 54.dp, glow = true)
                     }
-                    SaButton("VIEW ON GITHUB", { uri.openUri(app.repo.htmlUrl) }, Modifier.fillMaxWidth(), BtnStyle.OutlineLight)
+                    SaButton(
+                        if (app.repo.fullName.startsWith(FDROID_PREFIX)) "VIEW SOURCE PAGE" else "VIEW ON GITHUB",
+                        { uri.openUri(app.repo.htmlUrl) },
+                        Modifier.fillMaxWidth(),
+                        BtnStyle.OutlineLight,
+                    )
                     if (app.state != AppState.NOT_INSTALLED && app.packageName != null) {
                         SaButton("UNINSTALL", onUninstall, Modifier.fillMaxWidth(), BtnStyle.OutlineAlert)
                     }
@@ -164,9 +171,13 @@ fun DetailScreen(
             )
         }
 
-        Column(Modifier.fillMaxWidth().panel().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // F-Droid apps have no GitHub README, so this panel only shows for GitHub modules.
+        if (!app.repo.fullName.startsWith(FDROID_PREFIX)) Column(
+            Modifier.fillMaxWidth().panel().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             SectionLabel("README")
-            Mono("● LIVE FROM GITHUB · ${app.repo.fullName}", color = SA.Accent, spacing = 1.sp, maxLines = 1)
+            Mono("● LIVE FROM GITHUB · ${displayRepo(app.repo.fullName)}", color = SA.Accent, spacing = 1.sp, maxLines = 1)
             when (readme) {
                 null, ReadmeState.Loading -> Mono("FETCHING README…", size = 12.sp, spacing = 1.4.sp)
                 ReadmeState.Missing -> Text(

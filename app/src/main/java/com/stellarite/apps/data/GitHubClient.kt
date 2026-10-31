@@ -20,6 +20,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.Base64
 import kotlin.coroutines.coroutineContext
 
@@ -50,11 +51,15 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
      * Without a token: public repos of [user].
      * With a token: every repo the token's owner owns, including private ones.
      */
-    private suspend fun listRepos(user: String, token: String?): List<GhRepo> =
+    private suspend fun listRepos(
+        user: String,
+        token: String?,
+        own: Boolean = !token.isNullOrBlank(),
+    ): List<GhRepo> =
         withContext(Dispatchers.IO) {
             val out = mutableListOf<GhRepo>()
             for (page in 1..5) {
-                val url = if (token.isNullOrBlank()) {
+                val url = if (!own) {
                     "https://api.github.com/users/$user/repos?per_page=100&page=$page&type=owner"
                 } else {
                     "https://api.github.com/user/repos?per_page=100&page=$page&affiliation=owner"
@@ -106,8 +111,51 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
         }
 
     /** Repos (no forks/archived) whose latest release ships an APK. */
-    suspend fun fetchApps(user: String, token: String?): List<Triple<GhRepo, GhRelease, GhAsset>> {
-        val repos = listRepos(user, token).filter { !it.fork && !it.archived }
+    suspend fun fetchApps(
+        user: String,
+        token: String?,
+        own: Boolean = !token.isNullOrBlank(),
+    ): List<Triple<GhRepo, GhRelease, GhAsset>> {
+        val repos = listRepos(user, token, own).filter { !it.fork && !it.archived }
+        return withApkReleases(repos, token)
+    }
+
+    /** One repo (owner/name) if its latest release ships an APK, else null. */
+    suspend fun fetchRepoApp(fullName: String, token: String?): Triple<GhRepo, GhRelease, GhAsset>? {
+        val repo = withContext(Dispatchers.IO) {
+            http.newCall(request("https://api.github.com/repos/$fullName", token)).execute().use { resp ->
+                if ((resp.code == 403 || resp.code == 429) && resp.header("X-RateLimit-Remaining") == "0") {
+                    throw RateLimitException()
+                }
+                if (resp.code == 404) return@use null
+                if (!resp.isSuccessful) throw IOException("GitHub error ${resp.code}")
+                json.decodeFromString<GhRepo>(resp.body!!.string())
+            }
+        } ?: return null
+        return withApkReleases(listOf(repo), token).firstOrNull()
+    }
+
+    /** The first 100 repos the Access Key's owner has starred that ship an APK. Needs a token. */
+    suspend fun fetchStarredApps(token: String): List<Triple<GhRepo, GhRelease, GhAsset>> {
+        val repos = withContext(Dispatchers.IO) {
+            http.newCall(request("https://api.github.com/user/starred?per_page=100", token)).execute().use { resp ->
+                if ((resp.code == 403 || resp.code == 429) && resp.header("X-RateLimit-Remaining") == "0") {
+                    throw RateLimitException()
+                }
+                if (resp.code == 401 || resp.code == 403) {
+                    throw IOException("This Access Key can't read your starred repos.")
+                }
+                if (!resp.isSuccessful) throw IOException("GitHub error ${resp.code}")
+                json.decodeFromString<List<GhRepo>>(resp.body!!.string())
+            }
+        }
+        return withApkReleases(repos.filter { !it.archived }, token)
+    }
+
+    private suspend fun withApkReleases(
+        repos: List<GhRepo>,
+        token: String?,
+    ): List<Triple<GhRepo, GhRelease, GhAsset>> {
         val gate = Semaphore(4)
         return coroutineScope {
             repos.map { repo ->
@@ -271,11 +319,14 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
         dest: File,
         onProgress: (Float) -> Unit,
     ) = withContext(Dispatchers.IO) {
-        val req = if (token.isNullOrBlank()) {
-            request(asset.browserDownloadUrl, null, "*/*")
-        } else {
+        // The Access Key is only ever sent to GitHub's own API, never to other hosts such as F-Droid.
+        val viaGithubApi = !token.isNullOrBlank() && asset.url.startsWith("https://api.github.com/")
+        val req = if (viaGithubApi) {
             request(asset.url, token, "application/octet-stream")
+        } else {
+            request(asset.browserDownloadUrl, null, "*/*")
         }
+        val digest = asset.sha256?.let { MessageDigest.getInstance("SHA-256") }
         dest.parentFile?.mkdirs()
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("Download failed (${resp.code})")
@@ -290,10 +341,18 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
                         val n = input.read(buf)
                         if (n < 0) break
                         output.write(buf, 0, n)
+                        digest?.update(buf, 0, n)
                         read += n
                         if (total > 0) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
                     }
                 }
+            }
+        }
+        if (digest != null) {
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actual.equals(asset.sha256, ignoreCase = true)) {
+                dest.delete()
+                throw IOException("Checksum mismatch, so the download was discarded.")
             }
         }
     }

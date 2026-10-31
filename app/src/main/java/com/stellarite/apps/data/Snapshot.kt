@@ -25,6 +25,8 @@ data class DeviceSnapshot(
     val autoPatchOn: Boolean,
     val excluded: List<String>,
     val included: List<String>,
+    /** Extra sources (and F-Droid picks), so a restore can bring the catalog back too. */
+    val sources: List<Source> = emptyList(),
 ) {
     /** Ignores the timestamp so "nothing changed" can be detected. */
     fun fingerprint(): Int = copy(savedAt = 0L).hashCode()

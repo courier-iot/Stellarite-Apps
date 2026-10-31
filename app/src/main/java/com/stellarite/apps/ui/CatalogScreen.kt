@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.stellarite.apps.data.AppState
 import com.stellarite.apps.data.StoreApp
 import com.stellarite.apps.data.Transfer
+import com.stellarite.apps.data.displayRepo
 import com.stellarite.apps.ui.theme.SA
 import java.util.Locale
 
@@ -255,7 +256,7 @@ private fun AppCard(app: StoreApp, transfer: Transfer?, onOpen: () -> Unit, onAc
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Mono(app.repo.fullName, Modifier.padding(top = 2.dp), maxLines = 1)
+            Mono(displayRepo(app.repo.fullName), Modifier.padding(top = 2.dp), maxLines = 1)
             Spacer(Modifier.height(6.dp))
             Mono(statusText, color = if (app.state == AppState.NOT_INSTALLED) SA.Muted else tint, maxLines = 1)
         }

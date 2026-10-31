@@ -6,7 +6,11 @@ import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.stellarite.apps.data.AppState
+import com.stellarite.apps.data.ArchiveApp
+import com.stellarite.apps.data.Catalog
 import com.stellarite.apps.data.DeviceSnapshot
+import com.stellarite.apps.data.FDROID_PREFIX
+import com.stellarite.apps.data.FDroidClient
 import com.stellarite.apps.data.GhRepo
 import com.stellarite.apps.data.GitHubClient
 import com.stellarite.apps.data.InstallResult
@@ -16,7 +20,11 @@ import com.stellarite.apps.data.Prefs
 import com.stellarite.apps.data.ReadmeState
 import com.stellarite.apps.data.SnapModule
 import com.stellarite.apps.data.Snapshot
+import com.stellarite.apps.data.Source
+import com.stellarite.apps.data.SourceLinks
+import com.stellarite.apps.data.SourceType
 import com.stellarite.apps.data.StoreApp
+import com.stellarite.apps.data.SyncStage
 import com.stellarite.apps.data.Transfer
 import com.stellarite.apps.data.Vault
 import com.stellarite.apps.data.statusOf
@@ -31,6 +39,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 enum class Filter { ALL, UPDATES, INSTALLED }
 
@@ -49,6 +58,13 @@ data class UiState(
     val included: Set<String> = emptySet(),
     val vault: VaultUi = VaultUi(),
     val restore: RestoreUi? = null,
+    val sources: List<Source> = emptyList(),
+    val homeCount: Int = 0,
+    val sourceCounts: Map<String, Int> = emptyMap(),
+    val sourceErrors: Map<String, String> = emptyMap(),
+    val addSource: AddSourceUi? = null,
+    val archive: ArchiveUi? = null,
+    val archives: List<ArchiveCard> = emptyList(),
 ) {
     /** Modules that are installed and on the latest release. */
     val upToDate: Int get() = apps.count { it.state == AppState.INSTALLED }
@@ -64,6 +80,8 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = Prefs(app)
     private val client = GitHubClient()
+    private val fdroid = FDroidClient.withPrefs(prefs)
+    private val catalog = Catalog(app, client, fdroid, prefs)
     private val ctx: Context get() = getApplication<Application>()
     private val jobs = mutableMapOf<String, Job>()
 
@@ -73,6 +91,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             autoPatch = prefs.autoPatchOn,
             excluded = prefs.patchExcluded,
             included = prefs.patchIncluded,
+            sources = prefs.sources,
             vault = VaultUi(
                 target = prefs.backupTarget,
                 autoSnapshot = prefs.autoSnapshot,
@@ -93,11 +112,15 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
     init {
         SA.theme = ThemeId.fromKey(prefs.theme)
         AutoPatch.sync(ctx, prefs)
+        loadArchiveCards()
         refresh()
     }
 
-    private fun sourceLabel(): String =
-        if (prefs.token.isNotBlank()) "your GitHub" else "@${prefs.effectiveUser}"
+    private fun sourceLabel(): String = when {
+        prefs.token.isNotBlank() -> "Your GitHub"
+        prefs.username.isNotBlank() -> "@${prefs.username}"
+        else -> "The Home Archive"
+    }
 
     private fun tokenOrNull(): String? = prefs.token.ifBlank { null }
 
@@ -105,16 +128,23 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null, source = sourceLabel()) }
             try {
-                val found = client.fetchApps(prefs.effectiveUser, tokenOrNull())
-                val apps = found
-                    .map { (repo, release, apk) ->
-                        withLocalState(StoreApp(repo, release, apk, null, null, AppState.NOT_INSTALLED))
-                    }
+                val result = catalog.load()
+                val apps = result.apps
+                    .map { withLocalState(it) }
                     .sortedWith(
                         compareBy<StoreApp> { it.state != AppState.UPDATE_AVAILABLE }
                             .thenBy { it.repo.name.lowercase() }
                     )
-                _state.update { it.copy(loading = false, apps = apps, readmes = emptyMap()) }
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        apps = apps,
+                        readmes = emptyMap(),
+                        homeCount = result.homeCount,
+                        sourceCounts = result.counts,
+                        sourceErrors = result.errors,
+                    )
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -184,6 +214,11 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadReadme(app: StoreApp, force: Boolean = false) {
         val key = app.repo.fullName
+        if (key.startsWith(FDROID_PREFIX)) {
+            // F-Droid apps have no GitHub README to fetch.
+            _state.update { it.copy(readmes = it.readmes + (key to ReadmeState.Missing)) }
+            return
+        }
         val current = _state.value.readmes[key]
         if (!force && (current is ReadmeState.Loaded || current == ReadmeState.Loading || current == ReadmeState.Missing)) return
         _state.update { it.copy(readmes = it.readmes + (key to ReadmeState.Loading)) }
@@ -209,7 +244,8 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
     fun install(app: StoreApp) {
         val key = app.repo.fullName
         if (jobs[key]?.isActive == true) return
-        val file = File(ctx.cacheDir, "apks/${key.replace('/', '_')}-${app.release.tagName}.apk")
+        val safeName = key.replace('/', '_').replace(':', '_')
+        val file = File(ctx.cacheDir, "apks/$safeName-${app.release.tagName}.apk")
         jobs[key] = viewModelScope.launch {
             setTransfer(key, Transfer.Downloading(0f))
             try {
@@ -263,6 +299,291 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     fun reportMessage(text: String) = _state.update { it.copy(message = text) }
 
+    // ---- Sources ------------------------------------------------------------------------------
+
+    private var detectJob: Job? = null
+    private var fdroidJob: Job? = null
+    private var searchJob: Job? = null
+
+    private fun setSources(list: List<Source>) {
+        prefs.sources = list
+        _state.update { it.copy(sources = list) }
+    }
+
+    fun setSourceEnabled(id: String, on: Boolean) {
+        setSources(prefs.sources.map { if (it.id == id) it.copy(enabled = on) else it })
+        refresh()
+    }
+
+    fun removeSource(id: String) {
+        setSources(prefs.sources.filterNot { it.id == id })
+        refresh()
+    }
+
+    private fun updateAdd(f: AddSourceUi.() -> AddSourceUi) =
+        _state.update { s -> s.addSource?.let { s.copy(addSource = it.f()) } ?: s }
+
+    fun openAddSource() = _state.update { it.copy(addSource = AddSourceUi()) }
+
+    fun closeAddSource() {
+        detectJob?.cancel()
+        _state.update { it.copy(addSource = null) }
+    }
+
+    fun setAddInput(text: String) {
+        detectJob?.cancel()
+        updateAdd { AddSourceUi(input = text) }
+        if (text.isBlank()) return
+        val src = SourceLinks.parse(text)
+        if (src == null) {
+            updateAdd { copy(error = "That doesn't look like a GitHub or F-Droid link.") }
+            return
+        }
+        detect(src, debounce = true)
+    }
+
+    /** kind: "stars", "fdroid" or "izzy". */
+    fun quickAddSource(kind: String) {
+        detectJob?.cancel()
+        val src = when (kind) {
+            "stars" -> SourceLinks.stars()
+            "fdroid" -> SourceLinks.fdroid(SourceLinks.FDROID_URL, "F-Droid")
+            else -> SourceLinks.fdroid(SourceLinks.IZZY_URL, "IzzyOnDroid")
+        }
+        updateAdd { AddSourceUi() }
+        detect(src, debounce = false)
+    }
+
+    private fun detect(src: Source, debounce: Boolean) {
+        detectJob = viewModelScope.launch {
+            if (debounce) delay(450) // wait for typing to pause
+            updateAdd { copy(detected = src, checking = true) }
+            if (prefs.sources.any { it.sameTarget(src) }) {
+                updateAdd { copy(checking = false, error = "Already in your sources.") }
+                return@launch
+            }
+            try {
+                when (src.type) {
+                    SourceType.ACCOUNT -> {
+                        val items = client.fetchApps(src.value, tokenOrNull(), own = false)
+                        updateAdd {
+                            copy(
+                                checking = false,
+                                summary = if (items.isEmpty()) {
+                                    "${src.value} has no repos with APK releases yet."
+                                } else {
+                                    "${items.size} ${if (items.size == 1) "repo" else "repos"} with APK releases. All of them join your catalog."
+                                },
+                                preview = items.take(5).map { PreviewLine(it.first.name, it.second.tagName) },
+                            )
+                        }
+                    }
+                    SourceType.REPO -> {
+                        val item = client.fetchRepoApp(src.value, tokenOrNull())
+                        updateAdd {
+                            if (item == null) {
+                                copy(checking = false, error = "No APK release found in ${src.value}.")
+                            } else {
+                                copy(
+                                    checking = false,
+                                    summary = "One repo with an APK release.",
+                                    preview = listOf(PreviewLine(item.first.name, item.second.tagName)),
+                                )
+                            }
+                        }
+                    }
+                    SourceType.STARS -> updateAdd {
+                        if (tokenOrNull() == null) {
+                            copy(checking = false, error = "Starred repos need an Access Key. Add one in Uplink first.")
+                        } else {
+                            copy(checking = false, summary = "Your first 100 starred repos with APK releases join your catalog.")
+                        }
+                    }
+                    SourceType.FDROID -> updateAdd {
+                        copy(checking = false, summary = "F-Droid-style repository. Next you search it and pick the apps to add.")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                updateAdd { copy(checking = false, error = e.message ?: "Could not check that link") }
+            }
+        }
+    }
+
+    fun confirmAddSource() {
+        val a = _state.value.addSource ?: return
+        val src = a.detected ?: return
+        if (a.checking || a.error != null) return
+        if (src.type == SourceType.FDROID) {
+            closeAddSource()
+            openFdroid(src.value, src.label)
+            return
+        }
+        setSources(prefs.sources + src)
+        closeAddSource()
+        refresh()
+    }
+
+    // ---- Archives: browse a large F-Droid-style repository -------------------------------------
+
+    private val archiveCache = mutableMapOf<String, List<ArchiveApp>>()
+    private var archiveJob: Job? = null
+
+    private fun updateArchive(f: ArchiveUi.() -> ArchiveUi) =
+        _state.update { s -> s.archive?.let { s.copy(archive = it.f()) } ?: s }
+
+    /** Cards for the Archives tab: F-Droid plus any other index sources the user added. */
+    fun loadArchiveCards() {
+        val list = mutableListOf<Triple<String, String, String>>()
+        list += Triple(SourceLinks.FDROID_URL, "F-Droid", "The official free and open-source Android app repository.")
+        prefs.sources.filter { it.type == SourceType.FDROID }.forEach { s ->
+            if (list.none { it.first.equals(s.value, ignoreCase = true) }) {
+                list += Triple(s.value, s.label, "An F-Droid-style repository.")
+            }
+        }
+        val cards = list.map { (url, label, blurb) ->
+            val meta = fdroid.cachedMeta(url, ctx.cacheDir)
+            val picked = prefs.sources.firstOrNull {
+                it.type == SourceType.FDROID && it.value.equals(url, ignoreCase = true)
+            }?.picks?.size ?: 0
+            ArchiveCard(url, label, blurb, meta?.count?.takeIf { it > 0 }, meta?.verified, meta?.syncedAt ?: 0L, picked)
+        }
+        _state.update { it.copy(archives = cards) }
+    }
+
+    fun editFdroid(source: Source) = openFdroid(source.value, source.label)
+
+    fun openFdroid(repoUrl: String, label: String) {
+        archiveJob?.cancel()
+        val existing = prefs.sources.firstOrNull {
+            it.type == SourceType.FDROID && it.value.equals(repoUrl, ignoreCase = true)
+        }
+        val selected = existing?.picks?.toSet() ?: emptySet()
+        _state.update { it.copy(archive = ArchiveUi(repoUrl, label, selected = selected)) }
+        archiveJob = viewModelScope.launch {
+            val cached = fdroid.isFresh(repoUrl, ctx.cacheDir)
+            if (!cached && isMetered()) {
+                val size = fdroid.indexSize(repoUrl)
+                updateArchive { copy(phase = ArchivePhase.DATA_WARNING, sizeBytes = size) }
+            } else {
+                runArchiveSync(force = false)
+            }
+        }
+    }
+
+    private fun isMetered(): Boolean {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        return cm.isActiveNetworkMetered
+    }
+
+    fun archiveDownloadNow() {
+        archiveJob?.cancel()
+        updateArchive { copy(phase = ArchivePhase.SYNC, step = 0, bytes = 0, total = -1, error = null) }
+        archiveJob = viewModelScope.launch { runArchiveSync(force = false) }
+    }
+
+    fun archiveRefresh() {
+        archiveJob?.cancel()
+        updateArchive { copy(phase = ArchivePhase.SYNC, step = 0, bytes = 0, total = -1, error = null) }
+        archiveJob = viewModelScope.launch { runArchiveSync(force = true) }
+    }
+
+    private suspend fun runArchiveSync(force: Boolean) {
+        val ui = _state.value.archive ?: return
+        updateArchive { copy(phase = ArchivePhase.SYNC, step = 0) }
+        try {
+            var lastPct = -1
+            val file = fdroid.indexFile(ui.repoUrl, ctx.cacheDir, force) { stage, done, total ->
+                val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                when (stage) {
+                    SyncStage.DOWNLOAD -> if (pct != lastPct) {
+                        lastPct = pct
+                        updateArchive { copy(step = 0, bytes = done, total = total) }
+                    }
+                    SyncStage.VERIFY -> updateArchive { copy(step = 1) }
+                }
+            }
+            updateArchive { copy(step = 2) }
+            val key = ui.repoUrl.lowercase() + "@" + file.lastModified()
+            val apps = archiveCache[key] ?: fdroid.browse(file, ui.repoUrl).also {
+                archiveCache.keys.removeAll { k -> k.startsWith(ui.repoUrl.lowercase() + "@") }
+                archiveCache[key] = it
+                fdroid.saveCount(ui.repoUrl, ctx.cacheDir, it.size)
+            }
+            val meta = fdroid.cachedMeta(ui.repoUrl, ctx.cacheDir)
+            val cats = apps.flatMap { it.categories }.distinct().sortedBy { it.lowercase() }
+            updateArchive { copy(phase = ArchivePhase.READY, all = apps, categories = cats, verified = meta?.verified ?: false) }
+            applyArchiveFilters()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            updateArchive { copy(phase = ArchivePhase.ERROR, error = e.message ?: "Could not read the archive") }
+        }
+    }
+
+    private fun applyArchiveFilters() {
+        val ui = _state.value.archive ?: return
+        val f = ui.filters
+        val q = ui.query.trim().lowercase()
+        val now = System.currentTimeMillis()
+        val minUpdated = when (f.updated) {
+            UpdatedRange.ANY -> 0L
+            UpdatedRange.YEAR -> now - 365L * 86_400_000
+            UpdatedRange.MONTH -> now - 30L * 86_400_000
+        }
+        val list = ui.all.filter { a ->
+            (!f.fitsDevice || a.fits) &&
+                (!f.hideAntiFeatures || !a.flagged) &&
+                (f.category == null || f.category in a.categories) &&
+                (minUpdated == 0L || a.updated >= minUpdated) &&
+                (q.isEmpty() || a.name.lowercase().contains(q) || a.summary.lowercase().contains(q) || a.pkg.lowercase().contains(q))
+        }
+        val sorted = when (f.sort) {
+            ArchiveSort.AZ -> list.sortedBy { it.name.lowercase() }
+            ArchiveSort.ZA -> list.sortedByDescending { it.name.lowercase() }
+            ArchiveSort.NEWEST -> list.sortedByDescending { it.updated }
+        }
+        updateArchive { copy(shown = sorted) }
+    }
+
+    fun setArchiveQuery(q: String) {
+        updateArchive { copy(query = q) }
+        applyArchiveFilters()
+    }
+
+    fun setArchiveFilters(f: ArchiveFilters) {
+        updateArchive { copy(filters = f) }
+        applyArchiveFilters()
+    }
+
+    fun showArchiveFilters(show: Boolean) = updateArchive { copy(showFilters = show) }
+
+    fun toggleArchivePick(pkg: String) =
+        updateArchive { copy(selected = if (pkg in selected) selected - pkg else selected + pkg) }
+
+    fun confirmArchive() {
+        val ui = _state.value.archive ?: return
+        val list = prefs.sources.toMutableList()
+        val i = list.indexOfFirst { it.type == SourceType.FDROID && it.value.equals(ui.repoUrl, ignoreCase = true) }
+        when {
+            ui.selected.isEmpty() -> if (i >= 0) list.removeAt(i)
+            i >= 0 -> list[i] = list[i].copy(picks = ui.selected.sorted())
+            else -> list += Source(
+                UUID.randomUUID().toString(), SourceType.FDROID, ui.repoUrl, ui.label, true, ui.selected.sorted(),
+            )
+        }
+        setSources(list)
+        closeFdroid()
+        refresh()
+    }
+
+    fun closeFdroid() {
+        archiveJob?.cancel()
+        _state.update { it.copy(archive = null) }
+        loadArchiveCards()
+    }
+
     // ---- Backup Vault: snapshots --------------------------------------------------------------
 
     private fun updateVault(f: VaultUi.() -> VaultUi) = _state.update { it.copy(vault = it.vault.f()) }
@@ -280,6 +601,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             autoPatchOn = prefs.autoPatchOn,
             excluded = prefs.patchExcluded.sorted(),
             included = prefs.patchIncluded.sorted(),
+            sources = prefs.sources,
         )
     }
 
@@ -425,10 +747,32 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         prefs.autoPatchOn = dev.autoPatchOn
         prefs.patchExcluded = dev.excluded.toSet()
         prefs.patchIncluded = dev.included.toSet()
+        // Sources are added, never removed: anything this device already has stays.
+        val merged = prefs.sources.toMutableList()
+        dev.sources.forEach { s -> if (merged.none { it.sameTarget(s) }) merged += s }
+        prefs.sources = merged
         _state.update {
-            it.copy(autoPatch = dev.autoPatchOn, excluded = prefs.patchExcluded, included = prefs.patchIncluded)
+            it.copy(
+                autoPatch = dev.autoPatchOn,
+                excluded = prefs.patchExcluded,
+                included = prefs.patchIncluded,
+                sources = merged,
+            )
         }
         AutoPatch.sync(ctx, prefs)
+    }
+
+    /** Finds the release to install for one recorded module. F-Droid apps come from the loaded catalog. */
+    private suspend fun restoreTarget(m: SnapModule, mode: RestoreMode, fdroidApps: Map<String, StoreApp>): StoreApp? {
+        if (m.repo.startsWith(FDROID_PREFIX)) return fdroidApps[m.repo]
+        val resolved = client.resolveModule(
+            m.repo,
+            if (mode == RestoreMode.RECORDED) m.version else null,
+            tokenOrNull(),
+        ) ?: return null
+        val (release, apk) = resolved
+        val repo = GhRepo(name = m.name, fullName = m.repo, htmlUrl = "https://github.com/${m.repo}")
+        return StoreApp(repo, release, apk, m.pkg, null, AppState.NOT_INSTALLED)
     }
 
     /** Installs the ticked modules one after another; Android still confirms each install. */
@@ -448,25 +792,30 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (r.includeSettings) applySettings(dev)
             val problems = mutableListOf<String>()
+            // F-Droid apps are found through the catalog, which needs the sources loaded first.
+            val fdroidApps: Map<String, StoreApp> =
+                if (chosen.any { it.repo.startsWith(FDROID_PREFIX) }) {
+                    try {
+                        catalog.load().apps.associateBy { it.repo.fullName }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        problems += "F-Droid sources: ${e.message ?: "could not load"}"
+                        emptyMap()
+                    }
+                } else emptyMap()
             for ((i, m) in chosen.withIndex()) {
                 updateRestore { it.copy(progress = "Restoring ${i + 1} of ${chosen.size} · ${m.name}", done = null) }
                 try {
-                    val resolved = client.resolveModule(
-                        m.repo,
-                        if (r.mode == RestoreMode.RECORDED) m.version else null,
-                        tokenOrNull(),
-                    )
-                    if (resolved == null) {
-                        problems += "${m.name}: no APK release found"
+                    val app = restoreTarget(m, r.mode, fdroidApps)
+                    if (app == null) {
+                        problems += if (m.repo.startsWith(FDROID_PREFIX)) {
+                            "${m.name}: not found in its F-Droid source (tick \"sources\" to restore those too)"
+                        } else {
+                            "${m.name}: no APK release found"
+                        }
                         continue
                     }
-                    val (release, apk) = resolved
-                    val repo = GhRepo(
-                        name = m.name,
-                        fullName = m.repo,
-                        htmlUrl = "https://github.com/${m.repo}",
-                    )
-                    val app = StoreApp(repo, release, apk, m.pkg, null, AppState.NOT_INSTALLED)
                     val before = Installer.installedVersion(ctx, m.pkg ?: prefs.packageFor(m.repo))
                     install(app)
                     jobs[m.repo]?.join()

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stellarite.apps.data.StoreApp
+import com.stellarite.apps.data.displayRepo
 import com.stellarite.apps.ui.theme.SA
 
 /**
@@ -140,7 +141,7 @@ fun RosterSheet(
                         }
                         Column(Modifier.weight(1f)) {
                             Text(app.repo.name, color = SA.Text, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Mono(app.repo.fullName, maxLines = 1)
+                            Mono(displayRepo(app.repo.fullName), maxLines = 1)
                         }
                     }
                 }

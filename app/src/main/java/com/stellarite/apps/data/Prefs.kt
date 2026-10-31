@@ -3,6 +3,8 @@ package com.stellarite.apps.data
 import android.content.Context
 import androidx.core.content.edit
 import com.stellarite.apps.Config
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /** Local settings and the repo -> package-name map learned from downloaded APKs. */
 class Prefs(context: Context) {
@@ -51,6 +53,17 @@ class Prefs(context: Context) {
 
     /** True when the background updater has any work to do. */
     val autoPatchActive: Boolean get() = autoPatchOn || patchIncluded.isNotEmpty()
+
+    // ---- Extra sources ------------------------------------------------------------------------
+
+    private val sourcesJson = Json { ignoreUnknownKeys = true }
+
+    /** Extra places to get modules from, in the order the user added them. */
+    var sources: List<Source>
+        get() = runCatching {
+            sourcesJson.decodeFromString<List<Source>>(sp.getString("sources", "[]") ?: "[]")
+        }.getOrDefault(emptyList())
+        set(v) = sp.edit { putString("sources", sourcesJson.encodeToString(v)) }
 
     // ---- Backup Vault -------------------------------------------------------------------------
 
@@ -101,4 +114,10 @@ class Prefs(context: Context) {
 
     fun setPackage(repoFullName: String, pkg: String) =
         sp.edit { putString("pkg:$repoFullName", pkg) }
+
+    // ---- Repo signing keys (remembered the first time a non-pinned repo is used) --------------
+
+    fun repoKey(url: String): String? = sp.getString("repoKey:$url", null)
+
+    fun setRepoKey(url: String, fingerprint: String) = sp.edit { putString("repoKey:$url", fingerprint) }
 }

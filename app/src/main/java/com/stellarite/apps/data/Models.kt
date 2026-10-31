@@ -1,5 +1,6 @@
 package com.stellarite.apps.data
 
+import com.stellarite.apps.Config
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -12,6 +13,8 @@ data class GhAsset(
     val url: String,
     @SerialName("browser_download_url") val browserDownloadUrl: String,
     @SerialName("content_type") val contentType: String? = null,
+    /** Expected SHA-256 (hex) of the file, when the source publishes one (F-Droid does). */
+    val sha256: String? = null,
 )
 
 @Serializable
@@ -35,6 +38,19 @@ data class GhRepo(
     val archived: Boolean = false,
     @SerialName("stargazers_count") val stars: Int = 0,
 )
+
+/** Key prefix for apps that come from an F-Droid-style index rather than GitHub. */
+const val FDROID_PREFIX = "fdroid:"
+
+/**
+ * What users see under an app's name. The built-in catalog shows "Made by The Courier"
+ * instead of the account name; other GitHub repos show owner/repo; F-Droid apps show "F-Droid".
+ */
+fun displayRepo(fullName: String): String = when {
+    fullName.startsWith(FDROID_PREFIX) -> "F-Droid"
+    fullName.substringBefore('/').equals(Config.DEFAULT_OWNER, ignoreCase = true) -> "Made by The Courier"
+    else -> fullName
+}
 
 enum class AppState { NOT_INSTALLED, INSTALLED, UPDATE_AVAILABLE }
 

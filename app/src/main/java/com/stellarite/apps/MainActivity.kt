@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -54,7 +55,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stellarite.apps.data.AppState
 import com.stellarite.apps.data.Installer
 import com.stellarite.apps.data.StoreApp
+import com.stellarite.apps.ui.AddSourceScreen
 import com.stellarite.apps.ui.CatalogScreen
+import com.stellarite.apps.ui.ArchiveScreen
+import com.stellarite.apps.ui.ArchivesScreen
+import com.stellarite.apps.ui.SourcesPanel
 import com.stellarite.apps.ui.DetailScreen
 import com.stellarite.apps.ui.Mono
 import com.stellarite.apps.ui.RestoreScreen
@@ -122,6 +127,10 @@ private fun StellariteApp(vm: StoreViewModel) {
     val selectedApp = state.apps.firstOrNull { it.repo.fullName == selected }
     BackHandler(enabled = selectedApp != null) { selected = null }
     BackHandler(enabled = state.restore != null) { vm.closeRestore() }
+    BackHandler(enabled = state.addSource != null) { vm.closeAddSource() }
+    BackHandler(enabled = state.archive != null) { vm.closeFdroid() }
+
+    LaunchedEffect(tab) { if (tab == 1) vm.loadArchiveCards() }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -162,7 +171,29 @@ private fun StellariteApp(vm: StoreViewModel) {
     Column(Modifier.fillMaxSize().spaceBackground().statusBarsPadding()) {
         Box(Modifier.weight(1f)) {
             val restore = state.restore
-            if (restore != null) {
+            val archiveUi = state.archive
+            val addUi = state.addSource
+            if (archiveUi != null) {
+                ArchiveScreen(
+                    ui = archiveUi,
+                    onBack = vm::closeFdroid,
+                    onQuery = vm::setArchiveQuery,
+                    onFilters = vm::setArchiveFilters,
+                    onShowFilters = vm::showArchiveFilters,
+                    onToggle = vm::toggleArchivePick,
+                    onConfirm = vm::confirmArchive,
+                    onDownloadNow = vm::archiveDownloadNow,
+                    onRefresh = vm::archiveRefresh,
+                )
+            } else if (addUi != null) {
+                AddSourceScreen(
+                    ui = addUi,
+                    onInput = vm::setAddInput,
+                    onQuick = vm::quickAddSource,
+                    onCancel = vm::closeAddSource,
+                    onAdd = vm::confirmAddSource,
+                )
+            } else if (restore != null) {
                 RestoreScreen(
                     restore = restore,
                     onBack = vm::closeRestore,
@@ -196,8 +227,30 @@ private fun StellariteApp(vm: StoreViewModel) {
                     onOpen = { selected = it.repo.fullName },
                     onAction = ::act,
                 )
+            } else if (tab == 1) {
+                ArchivesScreen(
+                    cards = state.archives,
+                    onOpen = { vm.openFdroid(it.repoUrl, it.label) },
+                )
             } else {
                 val total = state.apps.size
+                val hasKey = vm.token.isNotBlank()
+                val sourcesPanel = SourcesPanel(
+                    homeTitle = when {
+                        hasKey -> "Your GitHub"
+                        vm.username.isNotBlank() -> "@${vm.username}"
+                        else -> "Home Archive"
+                    },
+                    homeSub = when {
+                        hasKey -> "all your repos"
+                        vm.username.isNotBlank() -> "github.com/${vm.username}"
+                        else -> "Made by The Courier"
+                    },
+                    homeCount = state.homeCount,
+                    sources = state.sources,
+                    counts = state.sourceCounts,
+                    errors = state.sourceErrors,
+                )
                 val summary =
                     if (state.autoPatch) "${state.apps.count { it.repo.fullName in state.excluded }} of $total modules excluded"
                     else "${state.armed().size} of $total modules armed"
@@ -209,6 +262,11 @@ private fun StellariteApp(vm: StoreViewModel) {
                     rosterSummary = summary,
                     onAutoPatch = ::setAutoPatch,
                     onOpenRoster = { showRoster = true },
+                    sources = sourcesPanel,
+                    onSourceEnabled = vm::setSourceEnabled,
+                    onSourceRemove = vm::removeSource,
+                    onSourceEdit = vm::editFdroid,
+                    onAddSource = vm::openAddSource,
                     vault = state.vault,
                     onVaultTarget = vm::setBackupTarget,
                     onAutoSnapshot = vm::setAutoSnapshot,
@@ -232,7 +290,7 @@ private fun StellariteApp(vm: StoreViewModel) {
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(16.dp))
         }
-        if (selectedApp == null && state.restore == null) {
+        if (selectedApp == null && state.restore == null && state.addSource == null && state.archive == null) {
             NavBar(tab) { tab = it }
         } else {
             Box(Modifier.navigationBarsPadding())
@@ -263,7 +321,8 @@ private fun NavBar(selected: Int, onSelect: (Int) -> Unit) {
             .navigationBarsPadding()
     ) {
         NavItem("CATALOG", Icons.Outlined.GridView, selected == 0, Modifier.weight(1f)) { onSelect(0) }
-        NavItem("CORE", Icons.Outlined.Settings, selected == 1, Modifier.weight(1f)) { onSelect(1) }
+        NavItem("ARCHIVES", Icons.Outlined.Storage, selected == 1, Modifier.weight(1f)) { onSelect(1) }
+        NavItem("CORE", Icons.Outlined.Settings, selected == 2, Modifier.weight(1f)) { onSelect(2) }
     }
 }
 
