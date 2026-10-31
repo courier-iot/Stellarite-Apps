@@ -1,0 +1,73 @@
+package com.stellarite.apps.patch
+
+import android.content.Context
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.stellarite.apps.data.GitHubClient
+import com.stellarite.apps.data.InstallResult
+import com.stellarite.apps.data.Installer
+import com.stellarite.apps.data.Prefs
+import com.stellarite.apps.data.RateLimitException
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+/** Background job: finds newer releases for opted-in modules and installs them. */
+class PatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+
+    override suspend fun doWork(): Result {
+        val ctx = applicationContext
+        val prefs = Prefs(ctx)
+        if (!prefs.autoPatchActive) return Result.success()
+        val token = prefs.token.ifBlank { null }
+        val client = GitHubClient()
+
+        return try {
+            val found = client.fetchApps(prefs.effectiveUser, token)
+            for ((repo, release, apk) in found) {
+                if (!prefs.shouldAutoPatch(repo.fullName)) continue
+                // Only modules installed through Stellarite Apps are known by package name.
+                val pkg = prefs.packageFor(repo.fullName) ?: continue
+                val installed = Installer.installedVersion(ctx, pkg) ?: continue
+                if (Installer.sameVersion(installed, release.tagName)) continue
+
+                val file = File(ctx.cacheDir, "apks/${repo.fullName.replace('/', '_')}-${release.tagName}.apk")
+                try {
+                    client.download(apk, token, file) { }
+                    val result = Installer.install(ctx, file, repo.name, background = true)
+                    if (result == InstallResult.NEEDS_PERMISSION) break
+                } catch (e: IOException) {
+                    file.delete()
+                    throw e
+                }
+            }
+            Result.success()
+        } catch (_: RateLimitException) {
+            Result.retry()
+        } catch (_: IOException) {
+            Result.retry()
+        }
+    }
+}
+
+object AutoPatch {
+    private const val NAME = "auto-patch"
+
+    /** Schedules or cancels the periodic patch job to match the saved settings. */
+    fun sync(ctx: Context, prefs: Prefs) {
+        val wm = WorkManager.getInstance(ctx)
+        if (!prefs.autoPatchActive) {
+            wm.cancelUniqueWork(NAME)
+            return
+        }
+        val request = PeriodicWorkRequestBuilder<PatchWorker>(6, TimeUnit.HOURS)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+    }
+}
