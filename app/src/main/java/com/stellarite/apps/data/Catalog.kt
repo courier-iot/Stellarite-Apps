@@ -13,6 +13,8 @@ data class CatalogResult(
     val counts: Map<String, Int>,
     /** Per extra source id: why it failed, if it did. */
     val errors: Map<String, String>,
+    /** Android repos of the main catalog with no APK release yet. */
+    val pending: List<GhRepo> = emptyList(),
 )
 
 /** Loads the main catalog plus every enabled extra source. Shared by the UI and the Auto-Patch worker. */
@@ -27,7 +29,7 @@ class Catalog(
     /** A failure in the main catalog is thrown; a failure in an extra source is reported but does not stop the rest. */
     suspend fun load(withSuggested: Boolean = false, onlyIfInstalled: Boolean = true): CatalogResult {
         val found = LinkedHashMap<String, StoreApp>()
-        val home = github.fetchApps(prefs.effectiveUser, token())
+        val (home, pending) = github.fetchHome(prefs.effectiveUser, token())
         home.forEach { found.putIfAbsent(it.first.fullName, toApp(it)) }
 
         val counts = mutableMapOf<String, Int>()
@@ -56,7 +58,7 @@ class Catalog(
                 }
             }
         }
-        return CatalogResult(found.values.toList(), home.size, counts, errors)
+        return CatalogResult(found.values.toList(), home.size, counts, errors, pending.filter { p -> !found.containsKey(p.fullName) })
     }
 
     private fun toApp(t: Triple<GhRepo, GhRelease, GhAsset>) =
@@ -70,6 +72,38 @@ class Catalog(
             github.fetchStarredApps(t).map(::toApp)
         }
         SourceType.FDROID -> fdroidApps(s)
+    }
+
+    /**
+     * Suggested apps that are already on the device, so they appear in the module list and can be updated
+     * even if they were installed before Stellarite Apps. Uses the cached index when there is one, otherwise a
+     * placeholder whose real build is resolved when the user taps update.
+     */
+    suspend fun installedSuggestions(): List<StoreApp> {
+        val out = mutableListOf<StoreApp>()
+        for (sg in Suggestions.ALL) {
+            val installed = Installer.installedVersion(ctx, sg.pkg) ?: continue
+            prefs.setPackage(sg.key, sg.pkg)
+            val resolved = try {
+                suggestedApp(sg, allowDownload = false)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (resolved != null) { out += resolved; continue }
+            val latest = fdroid.latestVersion(sg.repoUrl, sg.pkg) ?: installed
+            val blank = GhAsset(id = 0, name = "", url = "", browserDownloadUrl = "")
+            out += StoreApp(
+                repo = GhRepo(sg.title, sg.key, sg.sub, "https://f-droid.org/packages/${sg.pkg}"),
+                release = GhRelease(tagName = latest, name = latest),
+                apk = blank,
+                packageName = sg.pkg,
+                installedVersion = installed,
+                state = AppState.INSTALLED,
+            )
+        }
+        return out
     }
 
     /**

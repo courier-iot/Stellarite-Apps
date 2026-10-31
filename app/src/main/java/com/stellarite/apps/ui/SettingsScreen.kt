@@ -61,6 +61,12 @@ fun SettingsScreen(
     rosterSummary: String,
     onAutoPatch: (Boolean) -> Unit,
     onOpenRoster: () -> Unit,
+    wifiOnly: Boolean,
+    onWifiOnly: (Boolean) -> Unit,
+    screenshotsWifiOnly: Boolean,
+    onScreenshotsWifiOnly: (Boolean) -> Unit,
+    updateAlerts: Boolean,
+    onUpdateAlerts: (Boolean) -> Unit,
     sources: SourcesPanel,
     onSourceEnabled: (String, Boolean) -> Unit,
     onSourceRemove: (String) -> Unit,
@@ -134,6 +140,20 @@ fun SettingsScreen(
             Divider()
             SettingRow("Patch Roster", rosterSummary) {
                 SaButton("CONFIGURE", onOpenRoster, style = BtnStyle.OutlineLight)
+            }
+        }
+
+        Panel("DOWNLOADS & ALERTS") {
+            SettingRow("Wi-Fi only downloads", "Large downloads wait until you're on Wi-Fi. You can still tap DOWNLOAD ANYWAY on any one of them.") {
+                SaSwitch(wifiOnly, onWifiOnly, "Wi-Fi only downloads")
+            }
+            Divider()
+            SettingRow("Screenshots on Wi-Fi only", "F-Droid screenshots are separate image downloads. Turn off to always load them.") {
+                SaSwitch(screenshotsWifiOnly, onScreenshotsWifiOnly, "Screenshots on Wi-Fi only")
+            }
+            Divider()
+            SettingRow("Update alerts", "With Auto-Patch off, get a notification when modules have updates. Nothing installs by itself.") {
+                SaSwitch(updateAlerts, onUpdateAlerts, "Update alerts")
             }
         }
 

@@ -15,12 +15,43 @@ class Prefs(context: Context) {
         get() = sp.getString("username", "") ?: ""
         set(v) = sp.edit { putString("username", v.trim().removePrefix("@")) }
 
-    /** Personal access token; when set, the token owner's own repos are shown. */
+    /** Holds only the encrypted Access Key. Kept in its own file so backups can exclude it. */
+    private val secure = context.getSharedPreferences("stellarite_secure", Context.MODE_PRIVATE)
+
+    /**
+     * Personal access token; when set, the token owner's own repos are shown.
+     * Stored encrypted with a Keystore key. A token saved in plain text by an earlier version is
+     * encrypted and the plain copy removed the first time it is read.
+     */
     var token: String
-        get() = sp.getString("token", "") ?: ""
-        set(v) = sp.edit {
-            putString("token", v.trim())
-            remove("backupOwner") // the owner is re-learned from the new key
+        get() {
+            secure.getString("token", null)?.let { stored ->
+                val plain = SecretBox.decrypt(stored)
+                if (plain == null) secure.edit { remove("token") } // key lost: ask for the key again
+                return plain ?: ""
+            }
+            val legacy = sp.getString("token", "") ?: ""
+            if (legacy.isNotBlank()) {
+                val enc = SecretBox.encrypt(legacy)
+                if (enc != null) {
+                    secure.edit { putString("token", enc) }
+                    sp.edit { remove("token") }
+                }
+            }
+            return legacy
+        }
+        set(v) {
+            val t = v.trim()
+            sp.edit {
+                remove("token")
+                remove("backupOwner") // the owner is re-learned from the new key
+            }
+            if (t.isEmpty()) {
+                secure.edit { remove("token") }
+            } else {
+                // If the Keystore is unavailable the key is simply not saved, never stored in plain text.
+                SecretBox.encrypt(t)?.let { enc -> secure.edit { putString("token", enc) } }
+            }
         }
 
     /** The account to browse when no token is set. */
@@ -53,6 +84,29 @@ class Prefs(context: Context) {
 
     /** True when the background updater has any work to do. */
     val autoPatchActive: Boolean get() = autoPatchOn || patchIncluded.isNotEmpty()
+
+    /** Hold large downloads until Wi-Fi (or any unmetered connection). */
+    var wifiOnly: Boolean
+        get() = sp.getBoolean("wifiOnly", true)
+        set(v) = sp.edit { putBoolean("wifiOnly", v) }
+
+    /** Load F-Droid screenshots only on an unmetered connection (they are separate image downloads). */
+    var screenshotsWifiOnly: Boolean
+        get() = sp.getBoolean("screenshotsWifiOnly", true)
+        set(v) = sp.edit { putBoolean("screenshotsWifiOnly", v) }
+
+    /** With Auto-Patch off, notify when installed modules have updates. */
+    var updateAlerts: Boolean
+        get() = sp.getBoolean("updateAlerts", true)
+        set(v) = sp.edit { putBoolean("updateAlerts", v) }
+
+    /** What the last update alert listed, so the same updates aren't announced every 6 hours. */
+    var lastAlertSig: String
+        get() = sp.getString("lastAlertSig", "") ?: ""
+        set(v) = sp.edit { putString("lastAlertSig", v) }
+
+    /** True when the background job has anything to do: patching or alerts. */
+    val backgroundActive: Boolean get() = autoPatchActive || updateAlerts
 
     // ---- Extra sources ------------------------------------------------------------------------
 

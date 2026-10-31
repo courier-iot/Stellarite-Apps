@@ -53,6 +53,9 @@ fun DetailScreen(
     onOpenApp: () -> Unit,
     onUninstall: () -> Unit,
     onRetryReadme: () -> Unit,
+    fdroid: FDroidDetailsState? = null,
+    holdImages: Boolean = false,
+    onLoadFdroid: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val uri = LocalUriHandler.current
@@ -121,6 +124,8 @@ fun DetailScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val size = formatSize(app.apk.size)
                     when {
+                        transfer is Transfer.WaitingWifi ->
+                            SaButton("WAITING FOR WI-FI · DOWNLOAD ANYWAY", onInstall, Modifier.fillMaxWidth(), BtnStyle.Update, height = 54.dp, glow = true)
                         transfer is Transfer.Failed ->
                             SaButton("RETRY", onInstall, Modifier.fillMaxWidth(), BtnStyle.Accent, height = 54.dp, glow = true)
                         app.state == AppState.NOT_INSTALLED ->
@@ -168,6 +173,15 @@ fun DetailScreen(
                 color = SA.Text,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
+            )
+        }
+
+        if (app.repo.fullName.startsWith(FDROID_PREFIX)) {
+            FDroidSections(
+                state = fdroid,
+                holdImages = holdImages,
+                onLoad = onLoadFdroid,
+                sourceHost = app.repo.htmlUrl.substringAfter("://").substringBefore('/'),
             )
         }
 

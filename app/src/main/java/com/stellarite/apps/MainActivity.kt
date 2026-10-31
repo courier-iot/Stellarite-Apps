@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.stellarite.apps.data.AppState
 import com.stellarite.apps.data.Installer
 import com.stellarite.apps.data.StoreApp
+import com.stellarite.apps.data.Transfer
 import com.stellarite.apps.ui.AddSourceScreen
 import com.stellarite.apps.ui.CatalogScreen
 import com.stellarite.apps.ui.ArchiveScreen
@@ -143,10 +144,18 @@ private fun StellariteApp(vm: StoreViewModel) {
     }
 
     LaunchedEffect(selectedApp?.repo?.fullName) {
-        selectedApp?.let { vm.loadReadme(it) }
+        selectedApp?.let {
+            vm.loadReadme(it)
+            vm.loadFdroidDetails(it)
+        }
     }
 
     fun act(app: StoreApp) {
+        if (state.transfers[app.repo.fullName] is Transfer.WaitingWifi) {
+            vm.clearTransfer(app)
+            vm.install(app, force = true)
+            return
+        }
         if (app.state == AppState.INSTALLED && app.packageName != null && state.transfers[app.repo.fullName] == null) {
             if (!Installer.open(ctx, app.packageName)) vm.install(app)
         } else {
@@ -213,13 +222,17 @@ private fun StellariteApp(vm: StoreViewModel) {
                     readme = state.readmes[selectedApp.repo.fullName],
                     onBack = { selected = null },
                     onInstall = {
+                        val held = state.transfers[selectedApp.repo.fullName] is Transfer.WaitingWifi
                         vm.clearTransfer(selectedApp)
-                        vm.install(selectedApp)
+                        vm.install(selectedApp, force = held)
                     },
                     onCancel = { vm.cancel(selectedApp) },
                     onOpenApp = { selectedApp.packageName?.let { Installer.open(ctx, it) } },
                     onUninstall = { selectedApp.packageName?.let { Installer.uninstall(ctx, it) } },
                     onRetryReadme = { vm.loadReadme(selectedApp, force = true) },
+                    fdroid = state.fdroidDetails[selectedApp.repo.fullName],
+                    holdImages = state.screenshotsWifiOnly && (ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered,
+                    onLoadFdroid = { vm.loadFdroidDetails(selectedApp, force = it) },
                 )
             } else if (tab == 0) {
                 CatalogScreen(
@@ -274,6 +287,12 @@ private fun StellariteApp(vm: StoreViewModel) {
                     rosterSummary = summary,
                     onAutoPatch = ::setAutoPatch,
                     onOpenRoster = { showRoster = true },
+                    wifiOnly = state.wifiOnly,
+                    onWifiOnly = vm::setWifiOnly,
+                    screenshotsWifiOnly = state.screenshotsWifiOnly,
+                    onScreenshotsWifiOnly = vm::setScreenshotsWifiOnly,
+                    updateAlerts = state.updateAlerts,
+                    onUpdateAlerts = vm::setUpdateAlerts,
                     sources = sourcesPanel,
                     onSourceEnabled = vm::setSourceEnabled,
                     onSourceRemove = vm::removeSource,

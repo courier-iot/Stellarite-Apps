@@ -66,6 +66,11 @@ data class UiState(
     val addSource: AddSourceUi? = null,
     val archive: ArchiveUi? = null,
     val suggested: List<SuggestedItem> = emptyList(),
+    val pending: List<GhRepo> = emptyList(),
+    val wifiOnly: Boolean = true,
+    val screenshotsWifiOnly: Boolean = true,
+    val updateAlerts: Boolean = true,
+    val fdroidDetails: Map<String, FDroidDetailsState> = emptyMap(),
     val suggestedPrompt: SuggestedItem? = null,
     val archives: List<ArchiveCard> = emptyList(),
 ) {
@@ -95,6 +100,9 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             excluded = prefs.patchExcluded,
             included = prefs.patchIncluded,
             sources = prefs.sources,
+            wifiOnly = prefs.wifiOnly,
+            screenshotsWifiOnly = prefs.screenshotsWifiOnly,
+            updateAlerts = prefs.updateAlerts,
             vault = VaultUi(
                 target = prefs.backupTarget,
                 autoSnapshot = prefs.autoSnapshot,
@@ -132,7 +140,8 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(loading = true, error = null, source = sourceLabel()) }
             try {
                 val result = catalog.load()
-                val apps = result.apps
+                val extra = catalog.installedSuggestions().filter { x -> result.apps.none { it.repo.fullName == x.repo.fullName } }
+                val apps = (result.apps + extra)
                     .map { withLocalState(it) }
                     .sortedWith(
                         compareBy<StoreApp> { it.state != AppState.UPDATE_AVAILABLE }
@@ -144,6 +153,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                         apps = apps,
                         readmes = emptyMap(),
                         homeCount = result.homeCount,
+                        pending = result.pending,
                         sourceCounts = result.counts,
                         sourceErrors = result.errors,
                     )
@@ -159,6 +169,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Re-reads what is installed on the device (call when returning from the installer). */
     fun recheck() {
+        resumeWaiting()
         _state.update { s ->
             s.copy(
                 apps = s.apps.map { withLocalState(it) },
@@ -252,8 +263,19 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         s.copy(transfers = if (t == null) s.transfers - key else s.transfers + (key to t))
     }
 
-    fun install(app: StoreApp) {
+    fun install(app: StoreApp, force: Boolean = false) {
         val key = app.repo.fullName
+        // A suggested app known only by its installed version has no build yet: resolve it first.
+        if (app.apk.url.isBlank()) {
+            Suggestions.ALL.firstOrNull { it.key == key }?.let { installSuggested(SuggestedItem(it)) }
+            return
+        }
+        if (!force && prefs.wifiOnly && isMetered()) {
+            waiting[key] = app
+            setTransfer(key, Transfer.WaitingWifi)
+            return
+        }
+        waiting.remove(key)
         if (jobs[key]?.isActive == true) return
         val safeName = key.replace('/', '_').replace(':', '_')
         val file = File(ctx.cacheDir, "apks/$safeName-${app.release.tagName}.apk")
@@ -288,6 +310,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cancel(app: StoreApp) {
+        waiting.remove(app.repo.fullName)
         jobs[app.repo.fullName]?.cancel()
     }
 
@@ -306,6 +329,34 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         }
         refresh()
         AutoPatch.sync(ctx, prefs)
+    }
+
+    fun setWifiOnly(on: Boolean) {
+        prefs.wifiOnly = on
+        _state.update { it.copy(wifiOnly = on) }
+        AutoPatch.sync(ctx, prefs)
+        if (!on) resumeWaiting()
+    }
+
+    fun setScreenshotsWifiOnly(on: Boolean) {
+        prefs.screenshotsWifiOnly = on
+        _state.update { it.copy(screenshotsWifiOnly = on) }
+    }
+
+    fun setUpdateAlerts(on: Boolean) {
+        prefs.updateAlerts = on
+        _state.update { it.copy(updateAlerts = on) }
+        AutoPatch.sync(ctx, prefs)
+    }
+
+    /** Downloads held back for Wi-Fi, started again when Wi-Fi is back or the setting is switched off. */
+    private val waiting = mutableMapOf<String, StoreApp>()
+
+    private fun resumeWaiting() {
+        if (waiting.isEmpty() || (prefs.wifiOnly && isMetered())) return
+        val list = waiting.values.toList()
+        waiting.clear()
+        list.forEach { install(it, force = true) }
     }
 
     fun reportMessage(text: String) = _state.update { it.copy(message = text) }
@@ -436,6 +487,38 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
+    // ---- F-Droid app pages ------------------------------------------------------------------------
+
+    private fun putDetails(key: String, s: FDroidDetailsState) =
+        _state.update { it.copy(fdroidDetails = it.fdroidDetails + (key to s)) }
+
+    /** Reads the app's description, screenshots and history from the verified index. */
+    fun loadFdroidDetails(app: StoreApp, force: Boolean = false) {
+        val key = app.repo.fullName
+        if (!key.startsWith(FDROID_PREFIX)) return
+        if (!force && _state.value.fdroidDetails[key] is FDroidDetailsState.Loaded) return
+        val pkg = key.removePrefix(FDROID_PREFIX)
+        val repoUrl = prefs.sources.firstOrNull { it.type == SourceType.FDROID && pkg in it.picks }?.value
+            ?: Suggestions.ALL.firstOrNull { it.key == key }?.repoUrl
+            ?: SourceLinks.FDROID_URL
+        if (!force && !fdroid.isFresh(repoUrl, ctx.cacheDir) && prefs.wifiOnly && isMetered()) {
+            putDetails(key, FDroidDetailsState.NeedsWifi)
+            return
+        }
+        putDetails(key, FDroidDetailsState.Loading)
+        viewModelScope.launch {
+            try {
+                val index = fdroid.indexFile(repoUrl, ctx.cacheDir)
+                val d = fdroid.details(index, repoUrl, pkg)
+                putDetails(key, if (d != null) FDroidDetailsState.Loaded(d) else FDroidDetailsState.Failed("This app isn't in the index any more."))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                putDetails(key, FDroidDetailsState.Failed(e.message ?: "Could not read the index"))
+            }
+        }
+    }
+
     // ---- Suggested: recommended apps on the home page ------------------------------------------
 
     /** Shows what is known without touching the network; a large index is never downloaded by surprise. */
@@ -449,6 +532,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (e: Exception) {
                     null
                 }
+                prefs.setPackage(sg.key, sg.pkg) // known up front, so an app installed earlier is recognised
                 val old = _state.value.suggested.firstOrNull { it.s.key == sg.key }
                 SuggestedItem(
                     sg, app ?: old?.app, old?.preparing ?: false,
@@ -474,6 +558,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         }
         _state.update { it.copy(suggestedPrompt = null) }
         updateSuggested(sg.key) { copy(preparing = true) }
+        setTransfer(sg.key, Transfer.Downloading(0f))
         viewModelScope.launch {
             try {
                 val app = catalog.suggestedApp(sg, allowDownload = true)?.let { withLocalState(it) }
@@ -484,6 +569,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                 throw e
             } catch (e: Exception) {
                 updateSuggested(sg.key) { copy(preparing = false) }
+                setTransfer(sg.key, null)
                 _state.update { it.copy(message = e.message ?: "Could not prepare ${sg.title}") }
             }
         }
@@ -881,7 +967,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                         continue
                     }
                     val before = Installer.installedVersion(ctx, m.pkg ?: prefs.packageFor(m.repo))
-                    install(app)
+                    install(app, force = true)
                     jobs[m.repo]?.join()
                     val failed = _state.value.transfers[m.repo] as? Transfer.Failed
                     if (failed != null) {

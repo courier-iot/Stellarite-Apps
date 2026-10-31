@@ -37,6 +37,8 @@ data class GhRepo(
     val fork: Boolean = false,
     val archived: Boolean = false,
     @SerialName("stargazers_count") val stars: Int = 0,
+    val language: String? = null,
+    val topics: List<String> = emptyList(),
 )
 
 /** Key prefix for apps that come from an F-Droid-style index rather than GitHub. */
@@ -76,5 +78,7 @@ sealed interface ReadmeState {
 sealed interface Transfer {
     data class Downloading(val progress: Float) : Transfer
     data object Installing : Transfer
+    /** Held back because Wi-Fi only downloads is on and the connection is metered. */
+    data object WaitingWifi : Transfer
     data class Failed(val message: String) : Transfer
 }

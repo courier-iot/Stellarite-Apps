@@ -197,9 +197,14 @@ fun CatalogScreen(
             }
         }
 
-        if (q.isEmpty() && state.filter == Filter.ALL && state.suggested.isNotEmpty()) {
+        if (q.isEmpty() && state.filter == Filter.ALL && state.pending.isNotEmpty()) {
+            items(state.pending, key = { "pending-" + it.fullName }) { PendingCard(it) }
+        }
+
+        val offers = state.suggested.filter { !it.installed }
+        if (q.isEmpty() && state.filter == Filter.ALL && offers.isNotEmpty()) {
             item(key = "suggested-label") { SectionLabel("SUGGESTED", Modifier.padding(top = 6.dp)) }
-            items(state.suggested, key = { "suggested-" + it.s.key }) { s ->
+            items(offers, key = { "suggested-" + it.s.key }) { s ->
                 SuggestedCard(s, state.transfers[s.s.key], onAction = { onSuggested(s) })
             }
             item(key = "suggested-note") {
@@ -277,7 +282,11 @@ private fun AppCard(app: StoreApp, transfer: Transfer?, onOpen: () -> Unit, onAc
             )
             Mono(displayRepo(app.repo.fullName), Modifier.padding(top = 2.dp), maxLines = 1)
             Spacer(Modifier.height(6.dp))
-            Mono(statusText, color = if (app.state == AppState.NOT_INSTALLED) SA.Muted else tint, maxLines = 1)
+            if (transfer is Transfer.WaitingWifi) {
+                Mono("$statusText · WAITING FOR WI-FI", color = SA.Update, maxLines = 1)
+            } else {
+                Mono(statusText, color = if (app.state == AppState.NOT_INSTALLED) SA.Muted else tint, maxLines = 1)
+            }
         }
         ActionButton(app, transfer, onAction)
     }
@@ -290,6 +299,7 @@ fun ActionButton(app: StoreApp, transfer: Transfer?, onAction: () -> Unit, modif
         is Transfer.Downloading ->
             SaButton("${(transfer.progress * 100).toInt()}%", {}, m, BtnStyle.OutlineLight, enabled = false)
         Transfer.Installing -> SaButton("…", {}, m, BtnStyle.OutlineLight, enabled = false)
+        Transfer.WaitingWifi -> SaButton("DOWNLOAD\nANYWAY", onAction, modifier.width(112.dp), BtnStyle.OutlineLight)
         is Transfer.Failed -> SaButton("RETRY", onAction, m, BtnStyle.OutlineAlert)
         null -> when (app.state) {
             AppState.INSTALLED -> SaButton("OPEN", onAction, m, BtnStyle.OutlineLight)

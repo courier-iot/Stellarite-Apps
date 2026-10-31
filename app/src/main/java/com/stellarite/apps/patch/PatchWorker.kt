@@ -25,21 +25,35 @@ class PatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         val prefs = Prefs(ctx)
-        if (!prefs.autoPatchActive) return Result.success()
+        if (!prefs.backgroundActive) return Result.success()
         val token = prefs.token.ifBlank { null }
         val client = GitHubClient()
 
         return try {
-            val found = Catalog(ctx, client, FDroidClient.withPrefs(prefs), prefs).load(withSuggested = true).apps
+            val catalog = Catalog(ctx, client, FDroidClient.withPrefs(prefs), prefs)
+            val found = if (prefs.autoPatchActive) {
+                catalog.load(withSuggested = true).apps
+            } else {
+                // Alerts only: no large index downloads, just a cheap look at installed suggestions.
+                val base = catalog.load().apps
+                base + catalog.installedSuggestions().filter { s -> base.none { it.repo.fullName == s.repo.fullName } }
+            }
+            val needAlert = mutableListOf<String>()
+            val alertSig = mutableListOf<String>()
             for (app in found) {
                 val repo = app.repo
                 val release = app.release
                 val apk = app.apk
-                if (!prefs.shouldAutoPatch(repo.fullName)) continue
                 // Only modules installed through Stellarite Apps are known by package name.
                 val pkg = prefs.packageFor(repo.fullName) ?: continue
                 val installed = Installer.installedVersion(ctx, pkg) ?: continue
                 if (Installer.sameVersion(installed, release.tagName)) continue
+                if (!prefs.shouldAutoPatch(repo.fullName) || !prefs.autoPatchActive) {
+                    // Not patched automatically: tell the user instead.
+                    needAlert += repo.name
+                    alertSig += repo.fullName + "@" + release.tagName
+                    continue
+                }
 
                 val safeName = repo.fullName.replace('/', '_').replace(':', '_')
                 val file = File(ctx.cacheDir, "apks/$safeName-${release.tagName}.apk")
@@ -51,6 +65,15 @@ class PatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
                     file.delete()
                     throw e
                 }
+            }
+            if (prefs.updateAlerts && needAlert.isNotEmpty()) {
+                val sig = alertSig.sorted().joinToString("|")
+                if (sig != prefs.lastAlertSig) {
+                    Notifier.updatesAvailable(ctx, needAlert)
+                    prefs.lastAlertSig = sig
+                }
+            } else if (needAlert.isEmpty()) {
+                prefs.lastAlertSig = ""
             }
             Result.success()
         } catch (_: RateLimitException) {
@@ -67,12 +90,13 @@ object AutoPatch {
     /** Schedules or cancels the periodic patch job to match the saved settings. */
     fun sync(ctx: Context, prefs: Prefs) {
         val wm = WorkManager.getInstance(ctx)
-        if (!prefs.autoPatchActive) {
+        if (!prefs.backgroundActive) {
             wm.cancelUniqueWork(NAME)
             return
         }
+        val network = if (prefs.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
         val request = PeriodicWorkRequestBuilder<PatchWorker>(6, TimeUnit.HOURS)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
             .build()
         wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }

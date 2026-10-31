@@ -155,19 +155,45 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
     private suspend fun withApkReleases(
         repos: List<GhRepo>,
         token: String?,
-    ): List<Triple<GhRepo, GhRelease, GhAsset>> {
+    ): List<Triple<GhRepo, GhRelease, GhAsset>> = splitByRelease(repos, token).first
+
+    /** (repos with an APK release, repos without one). */
+    private suspend fun splitByRelease(
+        repos: List<GhRepo>,
+        token: String?,
+    ): Pair<List<Triple<GhRepo, GhRelease, GhAsset>>, List<GhRepo>> {
         val gate = Semaphore(4)
-        return coroutineScope {
+        val results = coroutineScope {
             repos.map { repo ->
                 async {
                     gate.withPermit {
                         val release = latestRelease(repo.fullName, token)
                         val apk = release?.let { pickApk(it) }
-                        if (release != null && apk != null) Triple(repo, release, apk) else null
+                        repo to (if (release != null && apk != null) Triple(repo, release, apk) else null)
                     }
                 }
-            }.awaitAll().filterNotNull()
+            }.awaitAll()
         }
+        return results.mapNotNull { it.second } to results.filter { it.second == null }.map { it.first }
+    }
+
+    /**
+     * Like [fetchApps], but also returns the account's Android-looking repos that have no APK release yet,
+     * so the home page can show them as "No release yet".
+     */
+    suspend fun fetchHome(
+        user: String,
+        token: String?,
+        own: Boolean = !token.isNullOrBlank(),
+    ): Pair<List<Triple<GhRepo, GhRelease, GhAsset>>, List<GhRepo>> {
+        val repos = listRepos(user, token, own).filter { !it.fork && !it.archived }
+        val (found, missing) = splitByRelease(repos, token)
+        val pending = missing.filter { r ->
+            r.name != com.stellarite.apps.Config.BACKUP_REPO &&
+                (r.language.equals("Kotlin", true) || r.language.equals("Java", true) ||
+                    r.topics.any { it.equals("android", true) })
+        }
+        return found to pending
     }
 
     /**

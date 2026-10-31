@@ -28,9 +28,16 @@ Besides the built-in **Home Archive** (shown as "Made by The Courier"), Control 
 
 Sources can be switched off or removed, are included in Backup Vault snapshots, and are covered by Auto-Patch. F-Droid downloads are verified against the SHA-256 in the index, and your Access Key is only ever sent to api.github.com.
 
+## Downloads and alerts
+
+- **Wi-Fi only downloads** (on by default): installers and archive indexes wait until you're on an unmetered connection. A held download shows WAITING FOR WI-FI with a DOWNLOAD ANYWAY button, and starts by itself when Wi-Fi returns. Background updates also wait for Wi-Fi. App details follow the same rule. Screenshots have their own switch (on by default): off means they always load.
+- **Update alerts** (on by default): when a module isn't patched automatically, a notification lists the updates (once per set of updates, not every check). Nothing installs on its own.
+- **No release yet:** Android-looking repos in your account that have no APK release show as greyed tiles ("In development"), only when no search or filter is active.
+- **F-Droid app pages:** description, categories, anti-features, screenshots, version history and license come from the verified index.
+
 ## Suggested
 
-Under your modules on the Catalog page, a Suggested section offers the official F-Droid app. Its build comes from F-Droid's own signed index (the same checks as Archives), then goes to Android's installer; the button becomes OPEN, or UPDATE when a newer version exists. The home page never downloads the large index by surprise: until it has been synced once, the card shows INSTALL without a version, and on mobile data you are asked before the download. Once installed, F-Droid is patched by Auto-Patch like any other module. The section is hidden while searching or filtering.
+Under your modules on the Catalog page, a Suggested section offers the official F-Droid app. Its build comes from F-Droid's own signed index (the same checks as Archives), then goes to Android's installer; the button becomes OPEN, or UPDATE when a newer version exists. The home page never downloads the large index by surprise: until it has been synced once, the card shows INSTALL without a version, and on mobile data you are asked before the download. If F-Droid is already on the device (even from before Stellarite Apps), it moves out of Suggested into your module list, shows as Installed, and offers UPDATE when F-Droid's public API lists a newer version; the update itself still comes from the verified index. After that it is patched by Auto-Patch like any other module. The section is hidden while searching or filtering.
 
 ## Archives
 
@@ -82,6 +89,10 @@ Stellarite Apps can install any APK from any source you add. It does not review 
 ## Auto-Patch details
 
 A background job runs about every 6 hours on a network connection. Installs go through Android's PackageInstaller, so on Android 12+ updates to apps this store originally installed can complete without a prompt. Where Android still requires confirmation (older versions, or a first install), you get a notification to tap. Enabling Auto-Patch asks for notification permission on Android 13+.
+
+## How the Access Key is stored
+
+The key is encrypted with an AES-GCM key held in the Android Keystore and saved in its own file, which is excluded from Android backups and device transfers. A key saved in plain text by an earlier version is encrypted the first time it is read. If the Keystore key is ever lost (for example after a restore to a new phone), the app simply asks for the Access Key again. The key is only ever sent to api.github.com.
 
 ## Known limits
 

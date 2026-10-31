@@ -33,6 +33,21 @@ data class ArchiveApp(
     val flagged: Boolean,
 )
 
+/** One entry in an app's version history. */
+data class FDroidVersionInfo(val name: String, val addedMs: Long, val size: Long)
+
+/** Everything the app page shows about an F-Droid app, read from the verified index. */
+data class FDroidDetails(
+    val description: String,
+    val categories: List<String>,
+    val license: String,
+    val updatedMs: Long,
+    val minSdk: Int,
+    val antiFeatures: List<String>,
+    val screenshots: List<String>,
+    val versions: List<FDroidVersionInfo>,
+)
+
 /** What was learned about a cached index. */
 data class IndexMeta(val verified: Boolean, val fingerprint: String?, val count: Int, val syncedAt: Long)
 
@@ -268,6 +283,186 @@ class FDroidClient(
             }
         }
         return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * The newest version F-Droid advertises for [pkg], from its small public API, or null when the repo has
+     * no such API. Used only to show an update hint; installs still come from the verified index.
+     */
+    suspend fun latestVersion(repoUrl: String, pkg: String): String? = withContext(Dispatchers.IO) {
+        val host = repoUrl.substringAfter("://").substringBefore('/')
+        if (!host.endsWith("f-droid.org")) return@withContext null
+        try {
+            val req = Request.Builder().url("https://f-droid.org/api/v1/packages/$pkg").build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val json = JSONObject(resp.body?.string() ?: return@withContext null)
+                val list = json.optJSONArray("packages") ?: return@withContext null
+                val suggested = json.optLong("suggestedVersionCode", -1)
+                var best: JSONObject? = null
+                for (i in 0 until list.length()) {
+                    val o = list.getJSONObject(i)
+                    if (o.optLong("versionCode") == suggested) { best = o; break }
+                    if (best == null) best = o
+                }
+                best?.optString("versionName")?.ifBlank { null }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Full details for one package, or null if the index doesn't list it. */
+    suspend fun details(index: File, repoUrl: String, pkg: String): FDroidDetails? = withContext(Dispatchers.IO) {
+        val base = repoUrl.trimEnd('/')
+        var out: FDroidDetails? = null
+        scan(index, only = setOf(pkg)) { r, _ -> out = readDetails(r, base) }
+        out
+    }
+
+    private data class VInfo(val code: Long, val name: String, val added: Long, val size: Long, val minSdk: Int, val anti: List<String>)
+
+    private fun readDetails(r: JsonReader, base: String): FDroidDetails {
+        var desc = ""
+        var license = ""
+        var updated = 0L
+        val cats = mutableListOf<String>()
+        val shots = mutableListOf<String>()
+        val vers = mutableListOf<VInfo>()
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "metadata" -> {
+                    r.beginObject()
+                    while (r.hasNext()) {
+                        when (r.nextName()) {
+                            "description" -> desc = readLocalized(r)
+                            "license" -> license = readString(r)
+                            "lastUpdated" -> updated = readLong(r)
+                            "categories" -> {
+                                if (r.peek() == JsonToken.BEGIN_ARRAY) {
+                                    r.beginArray()
+                                    while (r.hasNext()) cats += readString(r)
+                                    r.endArray()
+                                } else r.skipValue()
+                            }
+                            "screenshots" -> shots += readShots(r, base)
+                            else -> r.skipValue()
+                        }
+                    }
+                    r.endObject()
+                }
+                "versions" -> {
+                    r.beginObject()
+                    while (r.hasNext()) {
+                        r.nextName()
+                        vers += readVInfo(r)
+                    }
+                    r.endObject()
+                }
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+        val sorted = vers.sortedByDescending { it.code }
+        val newest = sorted.firstOrNull()
+        return FDroidDetails(
+            description = desc.replace(Regex("<[^>]+>"), "").trim(),
+            categories = cats,
+            license = license,
+            updatedMs = updated,
+            minSdk = newest?.minSdk ?: 0,
+            antiFeatures = newest?.anti ?: emptyList(),
+            screenshots = shots.take(8),
+            versions = sorted.take(8).map { FDroidVersionInfo(it.name, it.added, it.size) },
+        )
+    }
+
+    private fun readVInfo(r: JsonReader): VInfo {
+        var code = 0L
+        var name = ""
+        var added = 0L
+        var size = 0L
+        var minSdk = 0
+        val anti = mutableListOf<String>()
+        r.beginObject()
+        while (r.hasNext()) {
+            when (r.nextName()) {
+                "added" -> added = readLong(r)
+                "file" -> {
+                    r.beginObject()
+                    while (r.hasNext()) { if (r.nextName() == "size") size = readLong(r) else r.skipValue() }
+                    r.endObject()
+                }
+                "manifest" -> {
+                    r.beginObject()
+                    while (r.hasNext()) {
+                        when (r.nextName()) {
+                            "versionName" -> name = readString(r)
+                            "versionCode" -> code = readLong(r)
+                            "usesSdk" -> {
+                                if (r.peek() == JsonToken.BEGIN_OBJECT) {
+                                    r.beginObject()
+                                    while (r.hasNext()) { if (r.nextName() == "minSdkVersion") minSdk = readLong(r).toInt() else r.skipValue() }
+                                    r.endObject()
+                                } else r.skipValue()
+                            }
+                            else -> r.skipValue()
+                        }
+                    }
+                    r.endObject()
+                }
+                "antiFeatures" -> {
+                    if (r.peek() == JsonToken.BEGIN_OBJECT) {
+                        r.beginObject()
+                        while (r.hasNext()) { anti += r.nextName(); r.skipValue() }
+                        r.endObject()
+                    } else r.skipValue()
+                }
+                else -> r.skipValue()
+            }
+        }
+        r.endObject()
+        return VInfo(code, name, added, size, minSdk, anti)
+    }
+
+    /** screenshots is {"phone": {"en-US": [{"name": "/pkg/en-US/phoneScreenshots/1.png"}]}}. */
+    private fun readShots(r: JsonReader, base: String): List<String> {
+        if (r.peek() != JsonToken.BEGIN_OBJECT) { r.skipValue(); return emptyList() }
+        var phone: List<String> = emptyList()
+        r.beginObject()
+        while (r.hasNext()) {
+            if (r.nextName() == "phone" && r.peek() == JsonToken.BEGIN_OBJECT) phone = readShotFiles(r, base) else r.skipValue()
+        }
+        r.endObject()
+        return phone
+    }
+
+    private fun readShotFiles(r: JsonReader, base: String): List<String> {
+        var exact: List<String>? = null
+        var first: List<String>? = null
+        r.beginObject()
+        while (r.hasNext()) {
+            val key = r.nextName()
+            if (r.peek() == JsonToken.BEGIN_ARRAY) {
+                val list = mutableListOf<String>()
+                r.beginArray()
+                while (r.hasNext()) {
+                    if (r.peek() == JsonToken.BEGIN_OBJECT) {
+                        var n = ""
+                        r.beginObject()
+                        while (r.hasNext()) { if (r.nextName() == "name") n = readString(r) else r.skipValue() }
+                        r.endObject()
+                        if (n.isNotBlank()) list += base + (if (n.startsWith("/")) n else "/$n")
+                    } else r.skipValue()
+                }
+                r.endArray()
+                if (first == null) first = list
+                if (key.equals("en-US", ignoreCase = true)) exact = list
+            } else r.skipValue()
+        }
+        r.endObject()
+        return exact ?: first ?: emptyList()
     }
 
     /** Every app in the index, for the A-Z archive screen. */

@@ -17,13 +17,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stellarite.apps.data.AppState
 import com.stellarite.apps.data.Suggestion
+import com.stellarite.apps.data.GhRepo
 import com.stellarite.apps.data.StoreApp
+import com.stellarite.apps.data.displayRepo
 import com.stellarite.apps.data.Transfer
 import com.stellarite.apps.ui.theme.SA
 
@@ -89,5 +92,37 @@ fun SuggestedCard(
             StatusChip("OPEN SOURCE", SA.Muted)
             if (app?.state == AppState.UPDATE_AVAILABLE) StatusChip("UPDATE", SA.Update)
         }
+    }
+}
+
+
+/** One of the owner's repos that has no APK release yet, shown greyed out. */
+@Composable
+fun PendingCard(repo: GhRepo, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .alpha(0.78f)
+            .background(SA.Panel, SA.controlShape)
+            .border(1.dp, SA.Line2, SA.controlShape)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            Modifier
+                .size(52.dp)
+                .background(SA.Void, SA.tileShape)
+                .border(SA.tileBorder, SA.Line2, SA.tileShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(iconFor(repo.name), null, tint = SA.Muted, modifier = Modifier.size(26.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(repo.name, color = SA.Muted, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Mono(displayRepo(repo.fullName), Modifier.padding(top = 2.dp), maxLines = 1)
+            Mono("In development", Modifier.padding(top = 6.dp), maxLines = 1)
+        }
+        StatusChip("NO RELEASE YET", SA.Muted)
     }
 }
