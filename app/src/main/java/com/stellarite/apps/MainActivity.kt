@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Returning from the system installer: refresh installed/update status.
         vm.recheck()
+        // Coming back to the app: pick up repos and releases added since the last sync.
+        vm.refreshIfStale()
     }
 }
 

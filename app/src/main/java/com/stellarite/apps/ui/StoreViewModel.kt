@@ -135,8 +135,24 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun tokenOrNull(): String? = prefs.token.ifBlank { null }
 
+    private var refreshJob: Job? = null
+    private var lastRefreshAt = 0L
+
+    /**
+     * Re-reads the catalog when the app comes back to the front after a while, so a repo or release
+     * added in the meantime shows up without a manual sync. Spaced out to stay inside GitHub's
+     * 60 requests per hour limit when no Access Key is set.
+     */
+    fun refreshIfStale() {
+        if (_state.value.loading) return
+        if (System.currentTimeMillis() - lastRefreshAt < 15 * 60_000L) return
+        refresh()
+    }
+
     fun refresh() {
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        lastRefreshAt = System.currentTimeMillis()
+        refreshJob = viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null, source = sourceLabel()) }
             try {
                 val result = catalog.load()
