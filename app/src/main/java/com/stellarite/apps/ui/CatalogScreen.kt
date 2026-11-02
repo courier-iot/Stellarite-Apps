@@ -1,5 +1,6 @@
 package com.stellarite.apps.ui
 
+import com.stellarite.apps.data.isOwnRepo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,7 +78,9 @@ fun CatalogScreen(
     modifier: Modifier = Modifier,
 ) {
     val q = state.query.trim()
-    val visible = state.apps.filter { a ->
+    // The store's own entry stays out of the list, and only appears when an update is waiting.
+    val listed = state.apps.filter { !isOwnRepo(it.repo.fullName) || it.state == AppState.UPDATE_AVAILABLE }
+    val visible = listed.filter { a ->
         (q.isEmpty() || a.repo.name.contains(q, true) || (a.repo.description ?: "").contains(q, true)) &&
             when (state.filter) {
                 Filter.ALL -> true
@@ -85,8 +88,8 @@ fun CatalogScreen(
                 Filter.INSTALLED -> a.state != AppState.NOT_INSTALLED
             }
     }
-    val updates = state.apps.count { it.state == AppState.UPDATE_AVAILABLE }
-    val installed = state.apps.count { it.state != AppState.NOT_INSTALLED }
+    val updates = listed.count { it.state == AppState.UPDATE_AVAILABLE }
+    val installed = listed.count { it.state != AppState.NOT_INSTALLED }
 
     LazyColumn(
         modifier.fillMaxSize(),
@@ -152,7 +155,7 @@ fun CatalogScreen(
                     .background(SA.Panel, SA.controlShape)
                     .border(1.dp, if (SA.isSteam) SA.CardLine else SA.Line, SA.controlShape)
             ) {
-                Segment("ALL ${state.apps.size}", state.filter == Filter.ALL, Modifier.weight(1f)) { onFilter(Filter.ALL) }
+                Segment("ALL ${listed.size}", state.filter == Filter.ALL, Modifier.weight(1f)) { onFilter(Filter.ALL) }
                 Segment("UPDATES $updates", state.filter == Filter.UPDATES, Modifier.weight(1f)) { onFilter(Filter.UPDATES) }
                 Segment("INSTALLED $installed", state.filter == Filter.INSTALLED, Modifier.weight(1f)) { onFilter(Filter.INSTALLED) }
             }

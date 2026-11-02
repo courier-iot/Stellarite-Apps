@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 /** Local settings and the repo -> package-name map learned from downloaded APKs. */
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("stellarite", Context.MODE_PRIVATE)
+    private val ownPackage: String = context.packageName
 
     /** Custom GitHub username; blank means "use the built-in Stellarite catalog". */
     var username: String
@@ -164,7 +165,12 @@ class Prefs(context: Context) {
             .filter { it.key.startsWith("pkg:") && it.value is String }
             .associate { it.key.removePrefix("pkg:") to (it.value as String) }
 
-    fun packageFor(repoFullName: String): String? = sp.getString("pkg:$repoFullName", null)
+    /**
+     * Stellarite Apps listing itself: it was sideloaded, so no install through the store ever taught it its own
+     * package name. The repo is recognised by name, and mapped to this app, so it shows as installed and updates.
+     */
+    fun packageFor(repoFullName: String): String? =
+        sp.getString("pkg:$repoFullName", null) ?: if (isOwnRepo(repoFullName)) ownPackage else null
 
     fun setPackage(repoFullName: String, pkg: String) =
         sp.edit { putString("pkg:$repoFullName", pkg) }
@@ -175,3 +181,7 @@ class Prefs(context: Context) {
 
     fun setRepoKey(url: String, fingerprint: String) = sp.edit { putString("repoKey:$url", fingerprint) }
 }
+
+/** True for this app's own repository ("Stellarite-Apps"). */
+fun isOwnRepo(repoFullName: String): Boolean =
+    repoFullName.substringAfterLast('/').lowercase().filter { it.isLetterOrDigit() } == "stellariteapps"
