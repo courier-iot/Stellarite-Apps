@@ -1,24 +1,25 @@
-# .github/workflows/debug-apk.yml
+# Builds a SIGNED release APK and publishes it as a GitHub release whenever you push a version tag.
 #
-# - Every push to any branch, or the "Run workflow" button: builds a debug APK and
-#   saves it as a downloadable build artifact (Actions tab -> the run -> Artifacts).
-# - Pushing a tag like v0.1.0: also publishes a GitHub release with the APK attached,
-#   which is what Stellarite Apps lists.
-#     git tag v0.1.0 && git push origin v0.1.0
+#   git tag v1.0.0
+#   git push origin v1.0.0
+#
+# Stellarite Apps lists a repo once its latest release has an .apk attached, and compares the
+# installed versionName with the tag, so the tag (without the "v") becomes the app's version.
+#
+# One-time setup: four repository secrets (Settings > Secrets and variables > Actions):
+#   KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
 
-name: Debug APK
+name: Release
 
 on:
   push:
-    branches: ["**"]
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,29 +34,43 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Work out the version
-        id: ver
+      - name: Restore the signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing KEYSTORE_BASE64 secret. Without one fixed keystore, updates won't install over older versions."
+            exit 1
           fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
 
-      - name: Build debug APK
-        run: gradle assembleDebug -PversionName="${{ steps.ver.outputs.name }}"
+      - name: Build the release APK
+        env:
+          STORE_FILE: ${{ runner.temp }}/release.keystore
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          gradle assembleRelease \
+            -PversionName="${GITHUB_REF_NAME#v}" \
+            -PversionCode="${{ github.run_number }}"
 
-      - name: Save APK as a build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+      - name: Name the APK
+        id: apk
+        run: |
+          SRC=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          DEST="${{ github.event.repository.name }}-${GITHUB_REF_NAME}.apk"
+          cp "$SRC" "$DEST"
+          echo "file=$DEST" >> "$GITHUB_OUTPUT"
 
-      - name: Publish release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Works whether or not you already made the release by hand on github.com.
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          APK="${{ github.event.repository.name }}-${GITHUB_REF_NAME}.apk"
-          cp app/build/outputs/apk/debug/*-debug.apk "$APK"
-          gh release create "$GITHUB_REF_NAME" "$APK" --title "$GITHUB_REF_NAME" --generate-notes
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${{ steps.apk.outputs.file }}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${{ steps.apk.outputs.file }}" \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
