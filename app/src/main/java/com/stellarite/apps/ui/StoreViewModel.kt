@@ -577,7 +577,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         setTransfer(sg.key, Transfer.Downloading(0f))
         viewModelScope.launch {
             try {
-                val app = catalog.suggestedApp(sg, allowDownload = true)?.let { withLocalState(it) }
+                val app = catalog.suggestedApp(sg, allowDownload = true) { p -> setTransfer(sg.key, Transfer.Downloading(p * 0.9f)) }?.let { withLocalState(it) }
                     ?: error("${sg.title} has no build for this device in the index.")
                 updateSuggested(sg.key) { copy(app = app, preparing = false) }
                 install(app)
@@ -661,7 +661,8 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         try {
             var lastPct = -1
             val file = fdroid.indexFile(ui.repoUrl, ctx.cacheDir, force) { stage, done, total ->
-                val pct = if (total > 0) (done * 100 / total).toInt() else -1
+                // With an unknown size, update about every megabyte instead of every percent.
+                val pct = if (total > 0) (done * 100 / total).toInt() else (done / 1_000_000).toInt()
                 when (stage) {
                     SyncStage.DOWNLOAD -> if (pct != lastPct) {
                         lastPct = pct

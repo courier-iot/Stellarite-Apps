@@ -161,6 +161,7 @@ private fun SyncPanel(ui: ArchiveUi) {
                 modifier = Modifier.fillMaxWidth().height(4.dp), color = SA.Accent, trackColor = SA.Line,
             )
         } else {
+            if (ui.step == 0 && ui.bytes > 0) Mono("DOWNLOADING · ${ui.bytes / 1_000_000} MB", color = SA.Accent, spacing = 1.3.sp)
             LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp), color = SA.Accent, trackColor = SA.Line)
         }
         Step("Download index", "From the repository", ui.step, 0)

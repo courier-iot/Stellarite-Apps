@@ -288,7 +288,7 @@ private fun TransferPanel(app: StoreApp, transfer: Transfer?, onCancel: () -> Un
         SaButton("CANCEL TRANSFER", onCancel, Modifier.fillMaxWidth(), BtnStyle.OutlineAlert, height = 48.dp)
         SectionLabel("TRANSFER SEQUENCE")
         val active = if (transfer is Transfer.Downloading) 1 else 3
-        listOf("Fetch release from GitHub", "Download APK", "Verify package", "Hand off to Android installer")
+        listOf(if (app.repo.fullName.startsWith(FDROID_PREFIX)) "Fetch build from the F-Droid index" else "Fetch release from GitHub", "Download APK", "Verify package", "Hand off to Android installer")
             .forEachIndexed { i, label ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val (icon, tint) = when {

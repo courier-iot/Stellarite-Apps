@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.Icon
@@ -78,7 +79,7 @@ fun SuggestedCard(
                 Mono(item.s.sub, Modifier.padding(top = 2.dp), maxLines = 1)
                 Mono(versionLine, Modifier.padding(top = 6.dp), maxLines = 1)
             }
-            val m = Modifier.width(88.dp)
+            val m = Modifier.widthIn(min = 88.dp)
             when {
                 item.preparing -> SaButton("…", {}, m, BtnStyle.OutlineLight, enabled = false)
                 app != null -> ActionButton(app, transfer, onAction)

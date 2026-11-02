@@ -190,8 +190,9 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
         val (found, missing) = splitByRelease(repos, token)
         val pending = missing.filter { r ->
             r.name != com.stellarite.apps.Config.BACKUP_REPO &&
-                (r.language.equals("Kotlin", true) || r.language.equals("Java", true) ||
-                    r.topics.any { it.equals("android", true) })
+                // GitHub reports no language for new or mixed repos, so those count too.
+                (r.language == null || r.language.equals("Kotlin", true) || r.language.equals("Java", true) ||
+                    r.topics.any { it.equals("android", true) || it.equals("stellarite", true) })
         }
         return found to pending
     }

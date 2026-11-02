@@ -32,7 +32,7 @@ Sources can be switched off or removed, are included in Backup Vault snapshots, 
 
 - **Wi-Fi only downloads** (on by default): installers and archive indexes wait until you're on an unmetered connection. A held download shows WAITING FOR WI-FI with a DOWNLOAD ANYWAY button, and starts by itself when Wi-Fi returns. Background updates also wait for Wi-Fi. App details follow the same rule. Screenshots have their own switch (on by default): off means they always load.
 - **Update alerts** (on by default): when a module isn't patched automatically, a notification lists the updates (once per set of updates, not every check). Nothing installs on its own.
-- **No release yet:** Android-looking repos in your account that have no APK release show as greyed tiles ("In development"), only when no search or filter is active.
+- **No release yet:** Repos in your account that look like Android projects (Kotlin or Java, tagged `android` or `stellarite`, or with no language detected yet) and have no APK release show as greyed tiles ("In development"), only when no search or filter is active.
 - **F-Droid app pages:** description, categories, anti-features, screenshots, version history and license come from the verified index.
 
 ## Suggested

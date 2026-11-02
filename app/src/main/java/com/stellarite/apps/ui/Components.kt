@@ -285,6 +285,7 @@ fun SaButton(
             color = if (enabled) fg else SA.Muted,
             spacing = 1.2.sp,
             weight = if (SA.isSteam) FontWeight.Bold else FontWeight.Medium,
+            maxLines = if ('\n' in text) 2 else 1,
         )
     }
 }

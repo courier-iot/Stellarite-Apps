@@ -9,7 +9,14 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
+import java.io.FilterInputStream
 import java.io.IOException
+import java.io.InputStream
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.Properties
@@ -80,7 +87,7 @@ data class FDroidBuild(
  * [knownKey] and [rememberKey] read and store the remembered signing key per repo.
  */
 class FDroidClient(
-    private val http: OkHttpClient = OkHttpClient(),
+    private val http: OkHttpClient = defaultHttp(),
     private val knownKey: (String) -> String? = { null },
     private val rememberKey: (String, String) -> Unit = { _, _ -> },
 ) {
@@ -92,6 +99,16 @@ class FDroidClient(
         private val PINNED = mapOf(
             "https://f-droid.org/repo" to "43238D512C1E5EB2D6569F4A3AFBF5523418B82E0A3ED1552770ABB9A9C9CCAB",
         )
+
+        /** Long timeouts: the index is tens of megabytes and mobile connections stall now and then. */
+        private fun defaultHttp() = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor { chain ->
+                chain.proceed(chain.request().newBuilder().header("User-Agent", "StellariteApps/1.0 (Android)").build())
+            }
+            .build()
 
         fun withPrefs(prefs: Prefs) = FDroidClient(
             knownKey = { prefs.repoKey(it) },
@@ -184,26 +201,23 @@ class FDroidClient(
         if (!force && isFresh(repoUrl, cacheDir) && metaPath(file).exists()) return@withContext file
 
         val part = File(file.parentFile, file.name + ".part")
-        val req = Request.Builder().url("$base/index-v2.json").header("Accept", "application/json").build()
-        http.newCall(req).execute().use { resp ->
-            if (resp.code == 404) throw IOException("This repository doesn't offer index-v2.json.")
-            if (!resp.isSuccessful) throw IOException("Could not download the index (${resp.code})")
-            val body = resp.body ?: throw IOException("Empty index")
-            val total = body.contentLength()
-            var done = 0L
-            body.byteStream().use { input ->
-                part.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        onProgress(SyncStage.DOWNLOAD, done, total)
-                    }
-                }
+        var lastError: Exception? = null
+        var done = false
+        for (attempt in 1..3) {
+            try {
+                downloadIndex(base, part, onProgress)
+                done = true
+                break
+            } catch (e: HttpFailure) {
+                part.delete()
+                throw e
+            } catch (e: IOException) {
+                part.delete()
+                lastError = e
+                if (attempt < 3) kotlinx.coroutines.delay(1500L * attempt)
             }
         }
+        if (!done) throw IOException(friendlyNetworkError(lastError ?: IOException()), lastError)
 
         onProgress(SyncStage.VERIFY, 0, 0)
         val result = try {
@@ -219,6 +233,23 @@ class FDroidClient(
         p.setProperty("fp", result.second ?: "")
         metaPath(file).outputStream().use { p.store(it, null) }
         file
+    }
+
+    /** One attempt at fetching the index. Asks for gzip and unpacks it here, so progress follows the wire bytes. */
+    private fun downloadIndex(base: String, part: File, onProgress: (SyncStage, Long, Long) -> Unit) {
+        val req = Request.Builder().url("$base/index-v2.json")
+            .header("Accept", "application/json")
+            .header("Accept-Encoding", "gzip")
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (resp.code == 404) throw HttpFailure("This repository doesn't offer index-v2.json.")
+            if (!resp.isSuccessful) throw HttpFailure("The server answered ${resp.code} for the index.")
+            val body = resp.body ?: throw IOException("Empty index")
+            val total = body.contentLength()
+            val counted = CountingStream(body.byteStream()) { onProgress(SyncStage.DOWNLOAD, it, total) }
+            val stream = if (resp.header("Content-Encoding").equals("gzip", ignoreCase = true)) GZIPInputStream(counted) else counted
+            stream.use { input -> part.outputStream().use { input.copyTo(it, 64 * 1024) } }
+        }
     }
 
     /** Returns (verified, signing-key fingerprint). */
@@ -723,4 +754,24 @@ class FDroidClient(
         JsonToken.STRING -> r.nextString().toLongOrNull() ?: 0L
         else -> { r.skipValue(); 0L }
     }
+}
+
+/** An HTTP answer that retrying won't change (404, 500 and so on). */
+private class HttpFailure(message: String) : IOException(message)
+
+/** Counts the bytes read from the wire, so progress is right even when the body is gzip-compressed. */
+private class CountingStream(input: InputStream, private val onBytes: (Long) -> Unit) : FilterInputStream(input) {
+    private var total = 0L
+    override fun read(): Int = super.read().also { if (it >= 0) { total++; onBytes(total) } }
+    override fun read(b: ByteArray, off: Int, len: Int): Int =
+        super.read(b, off, len).also { if (it > 0) { total += it; onBytes(total) } }
+}
+
+/** A plain-language reason for a failed transfer. */
+private fun friendlyNetworkError(e: Exception): String = when {
+    e is SocketTimeoutException -> "The connection timed out. Check your signal and try again."
+    e is UnknownHostException -> "No internet connection."
+    e is SocketException || e.message?.contains("abort", ignoreCase = true) == true ->
+        "The connection was interrupted. Try again on a steadier connection."
+    else -> e.message ?: "The download failed."
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -201,7 +202,7 @@ fun CatalogScreen(
             items(state.pending, key = { "pending-" + it.fullName }) { PendingCard(it) }
         }
 
-        val offers = state.suggested.filter { !it.installed }
+        val offers = state.suggested.filter { s -> !s.installed && state.apps.none { it.repo.fullName == s.s.key } }
         if (q.isEmpty() && state.filter == Filter.ALL && offers.isNotEmpty()) {
             item(key = "suggested-label") { SectionLabel("SUGGESTED", Modifier.padding(top = 6.dp)) }
             items(offers, key = { "suggested-" + it.s.key }) { s ->
@@ -294,12 +295,12 @@ private fun AppCard(app: StoreApp, transfer: Transfer?, onOpen: () -> Unit, onAc
 
 @Composable
 fun ActionButton(app: StoreApp, transfer: Transfer?, onAction: () -> Unit, modifier: Modifier = Modifier) {
-    val m = modifier.width(88.dp)
+    val m = modifier.widthIn(min = 88.dp)
     when (transfer) {
         is Transfer.Downloading ->
             SaButton("${(transfer.progress * 100).toInt()}%", {}, m, BtnStyle.OutlineLight, enabled = false)
         Transfer.Installing -> SaButton("…", {}, m, BtnStyle.OutlineLight, enabled = false)
-        Transfer.WaitingWifi -> SaButton("DOWNLOAD\nANYWAY", onAction, modifier.width(112.dp), BtnStyle.OutlineLight)
+        Transfer.WaitingWifi -> SaButton("DOWNLOAD\nANYWAY", onAction, modifier.widthIn(min = 112.dp), BtnStyle.OutlineLight)
         is Transfer.Failed -> SaButton("RETRY", onAction, m, BtnStyle.OutlineAlert)
         null -> when (app.state) {
             AppState.INSTALLED -> SaButton("OPEN", onAction, m, BtnStyle.OutlineLight)

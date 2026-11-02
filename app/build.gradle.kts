@@ -13,12 +13,29 @@ android {
         applicationId = "com.stellarite.apps"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        // The release workflow passes these from the git tag (v1.2.0 -> 1.2.0) and the run number.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("versionName") as String?) ?: "1.0.0"
+    }
+
+    // Updates only install over apps signed with the same key, so releases always use one fixed keystore,
+    // supplied by the release workflow through environment variables. Without them (local builds) the
+    // release build stays unsigned and the debug build keeps its automatic key.
+    val storePath: String? = System.getenv("STORE_FILE")
+    signingConfigs {
+        if (!storePath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = System.getenv("STORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (!storePath.isNullOrBlank()) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -110,11 +110,11 @@ class Catalog(
      * The newest build of a suggested app. Without [allowDownload] this only answers from an index that is
      * already cached, so the home page never downloads a large index by surprise.
      */
-    suspend fun suggestedApp(sg: Suggestion, allowDownload: Boolean): StoreApp? {
+    suspend fun suggestedApp(sg: Suggestion, allowDownload: Boolean, onProgress: (Float) -> Unit = {}): StoreApp? {
         if (!allowDownload && (!fdroid.isFresh(sg.repoUrl, ctx.cacheDir) || fdroid.cachedMeta(sg.repoUrl, ctx.cacheDir) == null)) {
             return null
         }
-        val index = fdroid.indexFile(sg.repoUrl, ctx.cacheDir)
+        val index = fdroid.indexFile(sg.repoUrl, ctx.cacheDir) { _, done, total -> if (total > 0) onProgress(done.toFloat() / total) }
         return fdroid.resolve(index, sg.repoUrl, setOf(sg.pkg)).firstOrNull()?.let { toFdroidApp(it, sg.repoUrl) }
     }
 
