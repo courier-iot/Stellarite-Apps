@@ -1,82 +1,185 @@
 # Stellarite Apps
 
-A personal app store for Android. It lists the modules (apps) published in a GitHub account's releases, shows each repo's README, then downloads and installs the APKs. Debug/test build only, no Play Store or release signing.
+**A small, personal app launcher and installer for Android.**
 
-> This code has not been compiled yet. Expect a few small fixes on the first Gradle sync.
+Stellarite Apps puts your apps in one place. It lists the apps published as GitHub releases, installs them, keeps them up to date, and opens a door into big open-source catalogs like F-Droid. It was made mainly as the launcher for The Courier's own apps, and works just as well for yours.
 
-## Run it
+Two looks to choose from: **Stellarite Cyber** (graphite, cyan and crimson) and **Brassworks Steampunk** (leather, brass and copper).
 
-1. Open `StellariteApps/` in Android Studio (Koala or newer). It will sync Gradle and create the wrapper scripts.
-2. `DEFAULT_OWNER` in `app/src/main/java/com/stellarite/apps/Config.kt` is set to `courier-iot`. This is the built-in catalog every user sees first; change it there if the account ever moves.
-3. Run the `app` configuration on a device or emulator (Android 8.0+).
-4. The first time you install something, Android asks you to allow installs from Stellarite Apps. Control Core shows the clearance state.
+- Android 8.0 or newer
+- No account needed. No ads. No tracking.
+- Free and open source (MIT license)
 
-## What shows up in the catalog
+---
 
-A repo appears when it is not a fork or archived, and its **latest release** has an `.apk` asset. Pre-releases and drafts are skipped. If a release has several APKs, one named `universal` or `release` is preferred.
+## Get it
 
-Tag your releases with the app's `versionName` (`v1.2.0` or `1.2.0` both work). Update detection compares the installed `versionName` against the latest tag. The status line reads `SYNCED · up-to-date/total MODULES`.
+1. Open the **Releases** page of this repo and download the latest `.apk`.
+2. Tap the file to install it. Android asks you to allow installs from your browser or file manager. Say yes.
+3. Open **Stellarite Apps**. Under **CORE**, **Deploy Clearance** should say GRANTED. If it says ALLOW, tap it and allow installs from Stellarite Apps. That lets the app install other apps for you.
 
-## Sources
+Once it's installed, it updates itself: when a new version is released, an UPDATE tile appears on the Catalog page.
 
-Besides the built-in **Home Archive** (shown as "Made by The Courier"), Control Core > Sources lets you paste a link:
+---
 
-- `github.com/owner` adds every qualifying repo of an account or org.
-- `github.com/owner/repo` adds one repo.
-- **Stars** adds your starred repos (first 100; needs an Access Key).
-- An F-Droid-style repo address (F-Droid, IzzyOnDroid, others) opens that archive (see Archives): only the apps you tick join the catalog.
+## The easy stuff
 
-Sources can be switched off or removed, are included in Backup Vault snapshots, and are covered by Auto-Patch. F-Droid downloads are verified against the SHA-256 in the index, and your Access Key is only ever sent to api.github.com.
+### Catalog: your apps, one tap away
+The **CATALOG** tab lists every app from the built-in "Made by The Courier" archive. Each tile shows the app's name and state. Tap **INSTALL** to download and install it. Tap a tile for the full page with release notes and the app's README.
 
-## Downloads and alerts
+- **INSTALL** installs the app. **UPDATE** appears when a newer version is released. **OPEN** launches it.
+- **ALL / UPDATES / INSTALLED** filters the list, and search finds apps by name.
+- Greyed tiles are apps still in development that have no download yet.
+- After a download finishes, that app's button locks for 30 seconds (it shows WAIT 24s and counts down) so a double tap can't start it twice.
 
-- **Wi-Fi only downloads** (on by default): installers and archive indexes wait until you're on an unmetered connection. A held download shows WAITING FOR WI-FI with a DOWNLOAD ANYWAY button, and starts by itself when Wi-Fi returns. Background updates also wait for Wi-Fi. App details follow the same rule. Screenshots have their own switch (on by default): off means they always load.
-- **Update alerts** (on by default): when a module isn't patched automatically, a notification lists the updates (once per set of updates, not every check). Nothing installs on its own.
-- **No release yet:** Repos in your account that look like Android projects (Kotlin or Java, tagged `android` or `stellarite`, or with no language detected yet) and have no APK release show as greyed tiles ("In development"), only when no search or filter is active.
-- **F-Droid app pages:** description, categories, anti-features, screenshots, version history and license come from the verified index.
+### Updates
+Open the app and any available updates are on the Catalog page. Turn on **Auto-Patch** (CORE > GENERAL) and apps update by themselves in the background. Prefer to stay in charge? Leave it off and you get a notification when updates exist. Nothing installs unless you say so.
 
-## Suggested
+### Archives: F-Droid and more
+The **ARCHIVES** tab opens big open-source catalogs. F-Droid is built in. Open one to browse everything A to Z, search, filter by what fits your phone, and tick the apps you want to add to your catalog.
 
-Under your modules on the Catalog page, a Suggested section offers the official F-Droid app. Its build comes from F-Droid's own signed index (the same checks as Archives), then goes to Android's installer; the button becomes OPEN, or UPDATE when a newer version exists. The home page never downloads the large index by surprise: until it has been synced once, the card shows INSTALL without a version, and on mobile data you are asked before the download. If F-Droid is already on the device (even from before Stellarite Apps), it moves out of Suggested into your module list, shows as Installed, and offers UPDATE when F-Droid's public API lists a newer version; the update itself still comes from the verified index. After that it is patched by Auto-Patch like any other module. The section is hidden while searching or filtering.
+### Suggested
+Under your apps, **Suggested** offers the official F-Droid app, in case you'd rather use their store directly.
 
-## Archives
+### Already have the apps?
+Stellarite Apps finds apps already on your phone and matches them to the catalog, so they show as installed and get updates. See **Device Scan** under CORE > GENERAL.
 
-The ARCHIVES tab lists large open-source repositories. F-Droid is built in; any F-Droid-style source you add also appears. Opening one gives the whole index A to Z with sticky letters and a letter rail, search, app icons, and filters: fits this device (CPU and Android version), hide anti-features, category, updated, and sort. Tick apps and tap ADD to put them in your catalog.
+### Control Core
+The **CORE** tab holds every setting, in four tabs:
 
-On first open (or when the daily cache expires) the index is downloaded once. On mobile data you are asked first. The index is checked against the repository's signed `entry.jar` before use: F-Droid's signing key is built into the app; for other repos the key is remembered the first time and a change is refused. A repo with no signature file is usable but shown as UNSIGNED.
+| Tab | What's in it |
+| --- | --- |
+| **GENERAL** | Visor Skin (theme), Auto-Patch, Device Scan, Deploy Clearance, Payload Cache |
+| **OPERATOR** | Uplink (account and Access Key), Sources, Backup Vault, Commit & Sync |
+| **NETLINK** | Wi-Fi only downloads, screenshots on Wi-Fi, update alerts, link status |
+| **CREDITS** | Who made it, the F-Droid notice, libraries used |
 
-## Module detail and README
+Switches apply immediately. Only the Operator Handle and Access Key need **COMMIT & SYNC**.
 
+---
+
+## Advanced
+
+Everything below is optional. You don't need any of it to use the app.
+
+### Sources
+Besides the built-in archive, **CORE > OPERATOR > Sources** lets you paste a link:
+
+- `github.com/owner` adds every qualifying repo of an account or organization.
+- `github.com/owner/repo` adds a single repo.
+- **Stars** adds your starred repos (the first 100; needs an Access Key).
+- An F-Droid-style repo address (F-Droid, IzzyOnDroid and others) adds an archive. Only the apps you tick join your catalog.
+
+Sources can be switched off or removed. They are included in Backup Vault snapshots and covered by Auto-Patch.
+
+### Operator Handle and Access Key (Uplink)
+- Blank handle and no key: the built-in catalog.
+- Another GitHub handle: that account's public releases.
+- An Access Key (a GitHub token): your own repos, including private ones.
+
+GitHub limits anonymous requests to 60 per hour per device. A key raises that limit. The key is only ever sent to `api.github.com`.
+
+### How apps get into the catalog
+A repo appears when it is not a fork, is not archived, and its **latest release** has an `.apk` file attached. Pre-releases and drafts are skipped. If a release has several APKs, one named `universal` or `release` is preferred.
+
+Tag releases with the app's version (`v1.2.0` or `1.2.0` both work). Update detection compares the installed version with the latest tag, ignoring a leading `v` and trailing `.0`.
+
+Repos that look like Android projects (Kotlin or Java, tagged `android` or `stellarite`, or with no language detected yet) but have no APK release show as greyed "In development" tiles, only when no search or filter is active.
+
+### Auto-Patch
+- **ON:** every module patches itself, except those you untick in the **Patch Roster**.
+- **OFF:** the Patch Roster opens so you can tick the few modules that should still patch themselves.
+
+A background job runs about every 6 hours. Installs go through Android's PackageInstaller, so on Android 12 and newer, updates to apps this store originally installed can finish without a prompt. Where Android still asks (older versions or a first install), you get a notification to tap. Auto-Patch asks for notification permission on Android 13 and newer. Background updates wait for Wi-Fi when "Wi-Fi only downloads" is on.
+
+### NETLINK: downloads and alerts
+- **Wi-Fi only downloads** (on by default): installers and archive indexes wait for an unmetered connection. A held download shows WAITING FOR WI-FI with a **DOWNLOAD ANYWAY** button, and starts by itself when Wi-Fi returns.
+- **Screenshots on Wi-Fi only** (on by default): F-Droid screenshots are separate image downloads. Switch it off to always load them.
+- **Update alerts** (on by default): with Auto-Patch off, one notification lists the updates, once per set of updates rather than at every check.
+- **Link status** shows your connection type and whether an Access Key is set. SYNC NOW reloads the catalog.
+
+### Device Scan
+Apps installed before Stellarite Apps (or by another installer) normally aren't recognised, because Stellarite Apps learns an app's package name when it installs it. **Device Scan** closes that gap without downloading anything:
+
+- It compares each catalog repo's name with the names and package ids of the non-system apps on your phone. For example, "CyberTxTs" matches an installed app called "CyberTxTs" or "Cyber TxTs", or a package ending in `cybertxts`.
+- Ambiguous matches are skipped rather than guessed.
+- **Detect installed apps** (on by default) runs this each time the catalog loads. **Scan now** runs it once and reports what it found.
+- If an app's name differs a lot from its repo name, the scan can miss it. Installing it once through Stellarite Apps links it for good.
+
+Stellarite Apps recognises itself the same way, and hides its own tile unless an update is waiting.
+
+### Backup Vault
+Records which modules (and versions) you have installed, plus your skin and Patch Roster, so you can restore them on another device. It never stores your Access Key or any app data.
+
+- **File target:** SNAPSHOT NOW saves `stellarite-snapshot.json` through the system file picker (Drive, Syncthing, USB, NAS, anywhere). RESTORE opens a file you pick. No account or server is involved.
+- **GitHub target:** snapshots go to `snapshot.json` in a private repo named `stellarite-backup` in the account that owns your Access Key. Every save is a commit, so you get history for free. Auto-snapshot saves after installs, removals, and skin or roster changes.
+- Each device only rewrites its own section, so two devices never overwrite each other. Restore lets you pick which device's snapshot to use.
+- **Restore** shows each module as MISSING, INSTALLED or "HAS vX" and ticks what needs restoring. "As recorded" installs the exact recorded release (found by its tag). "Latest" installs the newest release. Android still asks you to confirm each install, and Deploy Clearance must be granted first.
+
+Access Key permissions for the GitHub target: it strictly needs **Contents read and write on the `stellarite-backup` repo**.
+
+- Safest: create an empty private repo named `stellarite-backup` yourself (tick "Add a README"), then use a fine-grained token limited to that repo with Contents read and write. If the same token also lists your repos for the catalog, it needs read access to those too.
+- Easiest: a classic token with the `repo` scope also lets the app create the repo on the first snapshot.
+- If the app can't create the repo, it says so and asks you to create it by hand. Treat creation as a convenience, not something to rely on.
+
+### Archives in depth
+Opening an archive gives the whole index A to Z with sticky letters and a letter rail, search, app icons, and filters: fits this device (CPU and Android version), hide anti-features, category, updated, and sort. Tick apps and tap ADD to put them in your catalog.
+
+On first open, or when the daily cache expires, the index is downloaded once (you're asked first on mobile data). F-Droid app pages show the description, categories, anti-features, screenshots, version history and license, all from the verified index.
+
+**Verification.** The index is checked against the repository's signed `entry.jar` before it is used. F-Droid's signing key is built into the app. For other repos, the key is remembered the first time and a later change is refused. A repo without a signature file still works but is labelled UNSIGNED. Every downloaded APK is checked against the SHA-256 in the index. If a check fails, nothing is installed and you get a clear message.
+
+### Suggested in depth
+The F-Droid card gets its build from F-Droid's own signed index (the same checks as Archives), then hands it to Android's installer. The home page never downloads the large index by surprise: until it has been synced once, the card shows INSTALL without a version, and on mobile data you are asked before the download. If F-Droid is already on your phone, it moves out of Suggested into your module list, shows as installed, and offers UPDATE when F-Droid's public API lists a newer version. The update itself still comes from the verified index.
+
+### How the Access Key is stored
+The key is encrypted with an AES-GCM key held in the Android Keystore and saved in its own file, which is excluded from Android backups and device transfers. A key saved in plain text by an earlier version is encrypted the first time it is read. If the Keystore key is ever lost (for example after a restore to a new phone), the app simply asks for the key again.
+
+### Module detail and README
 Under the release notes, the detail screen pulls the repo's README live from GitHub and renders it (headings, lists, code, quotes, tables, links). Images and raw HTML are skipped, relative links point at the repo, and long READMEs are trimmed with an "Open full README on GitHub" button.
 
-## Control Core (settings)
+### Publishing your own apps
+To list an app in your catalog:
 
-- **Uplink**: Operator Handle (GitHub username) and Access Key (token). Blank handle, no key = the built-in catalog. Another handle = that account's public releases. A token = the owner's own repos, including private ones. Unauthenticated requests are limited to 60/hour per device; a token raises that. The token stays in the app's private storage.
-- **Visor Skin**: Stellarite Cyber (graphite, cyan, crimson alerts) or Brassworks Steampunk (leather, brass, copper, serif type).
-- **Auto-Patch Protocol**: master switch.
-  - ON: every module patches itself except those you untick in the Patch Roster.
-  - OFF: the Patch Roster opens so you can tick the few modules that should still patch themselves.
-- **Deployment Core**: Deploy Clearance (install permission) and Payload Cache purge.
-- **Commit & Sync** saves the Uplink fields and reloads the catalog.
+1. Tag a release with the app's version (`v1.0.0`) and attach a signed `.apk`.
+2. Always sign releases with the same key. Updates only install over apps signed with the same key.
 
-## Backup Vault
+This repo's `.github/workflows/release.yml` shows one way to do it. Pushing a tag that starts with `v` builds a signed release APK and attaches it to a GitHub release. It needs four repository secrets (Settings > Secrets and variables > Actions):
 
-Control Core has a **Backup Vault** panel that records which modules (and versions) you have installed, plus your skin and Patch Roster, so you can restore them on another device. It never stores your Access Key or any app data.
+| Secret | What it is |
+| --- | --- |
+| `KEYSTORE_BASE64` | Your release keystore file, base64-encoded |
+| `KEYSTORE_PASSWORD` | The keystore password |
+| `KEY_ALIAS` | The key's alias |
+| `KEY_PASSWORD` | The key's password |
 
-- **File target:** SNAPSHOT NOW saves `stellarite-snapshot.json` through the system file picker (Drive, Syncthing, USB, NAS, anywhere). RESTORE opens a file you pick. No account or server involved.
-- **GitHub target:** snapshots go to `snapshot.json` in a private repo named `stellarite-backup` in the account that owns your Access Key. Every save is a commit, so you get history for free. Auto-Snapshot saves after installs, removals, skin and roster changes.
-- Each device only rewrites its own section of the file, so two devices never overwrite each other. Restore lets you pick which device's snapshot to use.
-- **Restore** shows each module as MISSING, INSTALLED or "HAS vX" and ticks what needs restoring. "As recorded" installs the exact recorded release (found by its tag); "Latest" installs the newest release. Android still asks you to confirm each install, and Deploy Clearance must be granted first.
+Create the keystore once and **back it up somewhere safe**. If you lose it, nobody can update the app without uninstalling it first. The workflow builds with `-PversionName` set from the tag, so the app's version always matches the release. `.github/workflows/debug-apk.yml` builds quick test APKs on every push.
 
-### Access Key permissions for GitHub backup
+### Building from source
+1. Open the project in Android Studio (Koala or newer) and let Gradle sync.
+2. The built-in catalog owner is set by `DEFAULT_OWNER` in `app/src/main/java/com/stellarite/apps/Config.kt`. Change it there if you fork the project.
+3. Run the `app` configuration on a device or emulator (Android 8.0 or newer).
 
-The one thing the GitHub target strictly needs is **Contents read and write on the `stellarite-backup` repo**.
+Release builds read `STORE_FILE`, `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` from the environment, and `-PversionName` / `-PversionCode` from Gradle. Without them, a local release build stays unsigned.
 
-- Safest: create an empty private repo named `stellarite-backup` yourself (tick "Add a README"), then use a fine-grained token limited to that repo with Contents read and write. (A token that also lists your repos for the catalog needs read access to those too.)
-- Easiest: a classic token with the `repo` scope also lets the app create the repo for you on the first snapshot.
-- If the app can't create the repo with your key, it says so and tells you to create it by hand. I could not confirm from GitHub's docs whether fine-grained tokens are allowed to create personal repos, so treat creation as a convenience, not something to rely on.
+Project layout:
 
-Known limits: Android will not install an older version over a newer one, so "as recorded" can't downgrade a module. Only modules installed through Stellarite Apps are recorded.
+- `data/` GitHub client, F-Droid client, models, installer, device scan, local prefs, backup vault
+- `patch/` Auto-Patch worker, install result receiver, notifications
+- `ui/` view model, Compose screens (Catalog, Detail, Archives, Control Core), Markdown renderer, theme and shared components
+- `MainActivity.kt` navigation between the three tabs and overlays
+
+### Known limits
+- Android never installs an older version over a newer one, so "as recorded" restores and F-Droid modules can't be downgraded.
+- Updates only install over apps signed with the same key. Switching signing keys means uninstalling once, which clears that app's data.
+- Index signature checking uses Android's JAR verifier. If a repo signs with an algorithm Android refuses, the sync fails rather than skipping the check.
+- Device Scan matches by name, so unusual names can be missed.
+- Only modules installed through Stellarite Apps are recorded in Backup Vault snapshots.
+- Stars are capped at the first 100.
+- Archive icons load from the repository over the network (via Coil). App icons in the catalog are generic glyphs, since GitHub releases don't carry artwork.
+- Fonts are system fonts (monospace and sans for Cyber, serif for Steampunk).
+
+---
 
 ## About other people's repositories
 
@@ -86,27 +189,6 @@ The F-Droid app repository belongs to the F-Droid project, and IzzyOnDroid's bel
 
 Stellarite Apps can install any APK from any source you add. It does not review third-party apps, so only add sources you trust. The software is provided as is, without warranty (see LICENSE).
 
-## Auto-Patch details
+---
 
-A background job runs about every 6 hours on a network connection. Installs go through Android's PackageInstaller, so on Android 12+ updates to apps this store originally installed can complete without a prompt. Where Android still requires confirmation (older versions, or a first install), you get a notification to tap. Enabling Auto-Patch asks for notification permission on Android 13+.
-
-## How the Access Key is stored
-
-The key is encrypted with an AES-GCM key held in the Android Keystore and saved in its own file, which is excluded from Android backups and device transfers. A key saved in plain text by an earlier version is encrypted the first time it is read. If the Keystore key is ever lost (for example after a restore to a new phone), the app simply asks for the Access Key again. The key is only ever sent to api.github.com.
-
-## Known limits
-
-- An app is only recognised as installed after it has been installed through Stellarite Apps once (the package name is read from the downloaded APK).
-- Updates only install over apps signed with the same key.
-- F-Droid modules cannot be downgraded. Index signature checking uses Android's JAR verifier; if a repo signs with an algorithm Android refuses, the sync fails rather than skipping the check.
-- Icons in Archives load from the repository over the network (via Coil).
-- Stars are capped at the first 100.
-- App icons are generic glyphs, since GitHub releases don't carry artwork.
-- Fonts are system fonts (monospace/sans for Cyber, serif for Steampunk); IBM Plex can be bundled later.
-
-## Layout
-
-- `data/` GitHub client, models, installer, local prefs, snapshot model and vault (backup)
-- `patch/` Auto-Patch worker, install result receiver, notifications
-- `ui/` view model, Compose screens (Catalog, Detail, Settings, Patch Roster sheet), Markdown renderer, theme and shared components
-- `MainActivity.kt` navigation between Catalog, Detail and Control Core
+Made by The Courier · Released under the MIT License
