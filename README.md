@@ -138,37 +138,6 @@ The key is encrypted with an AES-GCM key held in the Android Keystore and saved 
 ### Module detail and README
 Under the release notes, the detail screen pulls the repo's README live from GitHub and renders it (headings, lists, code, quotes, tables, links). Images and raw HTML are skipped, relative links point at the repo, and long READMEs are trimmed with an "Open full README on GitHub" button.
 
-### Publishing your own apps
-To list an app in your catalog:
-
-1. Tag a release with the app's version (`v1.0.0`) and attach a signed `.apk`.
-2. Always sign releases with the same key. Updates only install over apps signed with the same key.
-
-This repo's `.github/workflows/release.yml` shows one way to do it. Pushing a tag that starts with `v` builds a signed release APK and attaches it to a GitHub release. It needs four repository secrets (Settings > Secrets and variables > Actions):
-
-| Secret | What it is |
-| --- | --- |
-| `KEYSTORE_BASE64` | Your release keystore file, base64-encoded |
-| `KEYSTORE_PASSWORD` | The keystore password |
-| `KEY_ALIAS` | The key's alias |
-| `KEY_PASSWORD` | The key's password |
-
-Create the keystore once and **back it up somewhere safe**. If you lose it, nobody can update the app without uninstalling it first. The workflow builds with `-PversionName` set from the tag, so the app's version always matches the release. `.github/workflows/debug-apk.yml` builds quick test APKs on every push.
-
-### Building from source
-1. Open the project in Android Studio (Koala or newer) and let Gradle sync.
-2. The built-in catalog owner is set by `DEFAULT_OWNER` in `app/src/main/java/com/stellarite/apps/Config.kt`. Change it there if you fork the project.
-3. Run the `app` configuration on a device or emulator (Android 8.0 or newer).
-
-Release builds read `STORE_FILE`, `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` from the environment, and `-PversionName` / `-PversionCode` from Gradle. Without them, a local release build stays unsigned.
-
-Project layout:
-
-- `data/` GitHub client, F-Droid client, models, installer, device scan, local prefs, backup vault
-- `patch/` Auto-Patch worker, install result receiver, notifications
-- `ui/` view model, Compose screens (Catalog, Detail, Archives, Control Core), Markdown renderer, theme and shared components
-- `MainActivity.kt` navigation between the three tabs and overlays
-
 ### Known limits
 - Android never installs an older version over a newer one, so "as recorded" restores and F-Droid modules can't be downgraded.
 - Updates only install over apps signed with the same key. Switching signing keys means uninstalling once, which clears that app's data.
