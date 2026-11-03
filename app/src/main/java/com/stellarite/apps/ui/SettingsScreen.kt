@@ -1,6 +1,8 @@
 package com.stellarite.apps.ui
 
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -31,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +70,10 @@ fun SettingsScreen(
     onScreenshotsWifiOnly: (Boolean) -> Unit,
     updateAlerts: Boolean,
     onUpdateAlerts: (Boolean) -> Unit,
+    autoDetect: Boolean,
+    onAutoDetect: (Boolean) -> Unit,
+    scanning: Boolean,
+    onScan: () -> Unit,
     sources: SourcesPanel,
     onSourceEnabled: (String, Boolean) -> Unit,
     onSourceRemove: (String) -> Unit,
@@ -79,26 +86,29 @@ fun SettingsScreen(
     onRestore: () -> Unit,
     onSave: (username: String, token: String) -> Unit,
     onClearCache: () -> Unit,
+    onSyncNow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
     var username by remember { mutableStateOf(initialUsername) }
     var token by remember { mutableStateOf(initialToken) }
     var canInstall by remember { mutableStateOf(ctx.packageManager.canRequestPackageInstalls()) }
+    var tab by rememberSaveable { mutableStateOf(CoreTab.GENERAL) }
+    val connectivity = remember { ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager }
+    var metered by remember { mutableStateOf(connectivity.isActiveNetworkMetered) }
 
     LifecycleResumeEffect(Unit) {
         canInstall = ctx.packageManager.canRequestPackageInstalls()
+        metered = connectivity.isActiveNetworkMetered
         onPauseOrDispose { }
     }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier.fillMaxSize()) {
+        Row(
+            Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             BrandLogo(if (SA.isSteam) 36.dp else 30.dp)
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Wordmark("CONTROL CORE")
@@ -106,84 +116,185 @@ fun SettingsScreen(
             }
         }
 
-        Panel("UPLINK") {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Mono("OPERATOR HANDLE (BLANK = HOME ARCHIVE)", spacing = 1.3.sp)
-                SaField(username, { username = it }, Modifier.fillMaxWidth(), placeholder = "Home Archive")
+        CoreTabs(tab, { tab = it }, Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp))
+
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            when (tab) {
+                CoreTab.GENERAL -> {
+                Panel("VISOR SKIN") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ThemeId.entries.forEach { t ->
+                            ThemeTile(t, selected = SA.theme == t, modifier = Modifier.weight(1f)) { onTheme(t) }
+                        }
+                    }
+                }
+                Panel("AUTO-PATCH") {
+                    SettingRow("Auto-Patch Protocol", "Modules patch themselves in the background") {
+                        SaSwitch(autoPatch, onAutoPatch, "Auto-Patch Protocol")
+                    }
+                    Divider()
+                    SettingRow("Patch Roster", rosterSummary) {
+                        SaButton("CONFIGURE", onOpenRoster, style = BtnStyle.OutlineLight)
+                    }
+                }
+                Panel("DEVICE SCAN") {
+                    SettingRow("Detect installed apps", "Matches apps already on this phone to your catalog, so they show as installed and receive updates.") {
+                        SaSwitch(autoDetect, onAutoDetect, "Detect installed apps")
+                    }
+                    Divider()
+                    SettingRow("Scan now", "Looks through this device once. Nothing is downloaded or changed.") {
+                        SaButton(if (scanning) "SCANNING" else "SCAN", onScan, style = BtnStyle.OutlineLight, enabled = !scanning)
+                    }
+                }
+                Panel("DEPLOYMENT CORE") {
+                    SettingRow("Deploy Clearance", "Android asks once per source app") {
+                        if (canInstall) {
+                            Mono("GRANTED", Modifier.borderBadge(SA.Installed), color = SA.Installed, spacing = 1.sp)
+                        } else {
+                            SaButton("ALLOW", {
+                                ctx.startActivity(
+                                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}"))
+                                )
+                            }, style = BtnStyle.OutlineAlert)
+                        }
+                    }
+                    Divider()
+                    SettingRow("Payload Cache", "Cached installers on this device") {
+                        SaButton("PURGE", onClearCache, style = BtnStyle.OutlineAlert)
+                    }
+                }
+                }
+
+                CoreTab.OPERATOR -> {
+                Panel("UPLINK") {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Mono("OPERATOR HANDLE (BLANK = HOME ARCHIVE)", spacing = 1.3.sp)
+                        SaField(username, { username = it }, Modifier.fillMaxWidth(), placeholder = "Home Archive")
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Mono("ACCESS KEY (OPTIONAL)", spacing = 1.3.sp)
+                        SaField(token, { token = it }, Modifier.fillMaxWidth(), password = true)
+                        Text(
+                            "Sign in with a key to browse your own repos, including private ones, and to avoid GitHub's 60 requests per hour limit. Leave both blank to return to the Home Archive.",
+                            color = SA.Muted,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                }
+                SourcesSection(sources, onSourceEnabled, onSourceRemove, onSourceEdit, onAddSource)
+                VaultPanel(vault, onVaultTarget, onAutoSnapshot, onSnapshotNow, onRestore)
+                SaButton("COMMIT & SYNC", { onSave(username, token) }, Modifier.fillMaxWidth(), BtnStyle.Accent, height = 54.dp, glow = true)
+                }
+
+                CoreTab.NETLINK -> {
+                    Panel("DOWNLOADS") {
+                        SettingRow("Wi-Fi only downloads", "Large downloads wait until you're on Wi-Fi. You can still tap DOWNLOAD ANYWAY on any one of them.") {
+                            SaSwitch(wifiOnly, onWifiOnly, "Wi-Fi only downloads")
+                        }
+                        Divider()
+                        SettingRow("Screenshots on Wi-Fi only", "F-Droid screenshots are separate image downloads. Turn off to always load them.") {
+                            SaSwitch(screenshotsWifiOnly, onScreenshotsWifiOnly, "Screenshots on Wi-Fi only")
+                        }
+                    }
+                    Panel("ALERTS") {
+                        SettingRow("Update alerts", "With Auto-Patch off, get a notification when modules have updates. Nothing installs by itself.") {
+                            SaSwitch(updateAlerts, onUpdateAlerts, "Update alerts")
+                        }
+                        StatusNote(
+                            (if (autoPatch) "AUTO-PATCH IS ON" else "AUTO-PATCH IS OFF") +
+                                (if (updateAlerts && !autoPatch) " · ALERTS ARE ACTIVE" else if (!updateAlerts) " · ALERTS ARE OFF" else "") +
+                                " · CHECKED ABOUT EVERY 6 HOURS"
+                        )
+                    }
+                    Panel("LINK STATUS") {
+                        StatusNote(
+                            "CONNECTION · " + (if (metered) "MOBILE DATA (METERED)" else "WI-FI / UNMETERED") + "\n" +
+                                "ACCESS KEY · " + (if (token.isNotBlank()) "SET (HIGHER GITHUB LIMIT)" else "NOT SET (60 REQUESTS PER HOUR)")
+                        )
+                        SaButton("SYNC NOW", onSyncNow, Modifier.fillMaxWidth(), BtnStyle.OutlineLight)
+                    }
+                }
+
+                CoreTab.CREDITS -> {
+                    Panel("STELLARITE APPS") {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            BrandLogo(52.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("Made by The Courier", color = SA.Text, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                                Mono("VERSION ${BuildConfig.VERSION_NAME} · MIT LICENSE", spacing = 1.4.sp)
+                            }
+                        }
+                    }
+                    Panel("ABOUT F-DROID") {
+                        Text(
+                            "F-Droid's app repository belongs to the F-Droid project. Stellarite Apps only gives you a way " +
+                                "into it from your own launcher. It is not made by or affiliated with F-Droid and is not meant " +
+                                "to replace their app store. If you would rather use theirs, you can get the official F-Droid app.",
+                            color = SA.Muted, fontSize = 13.sp, lineHeight = 19.sp,
+                        )
+                        SaButton(
+                            "GET THE F-DROID APP",
+                            {
+                                try {
+                                    ctx.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    )
+                                } catch (_: Exception) {
+                                }
+                            },
+                            Modifier.fillMaxWidth(), BtnStyle.OutlineLight, height = 48.dp,
+                        )
+                    }
+                    Panel("BUILT WITH") {
+                        StatusNote("JETPACK COMPOSE · MATERIAL 3\nOKHTTP · COIL\nKOTLINX SERIALIZATION\nANDROIDX WORKMANAGER")
+                    }
+                    Mono("STELLARITE APPS v${BuildConfig.VERSION_NAME}", Modifier.fillMaxWidth(), spacing = 1.4.sp)
+                }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Mono("ACCESS KEY (OPTIONAL)", spacing = 1.3.sp)
-                SaField(token, { token = it }, Modifier.fillMaxWidth(), password = true)
-                Text(
-                    "Sign in with a key to browse your own repos, including private ones, and to avoid GitHub's 60 requests per hour limit. Leave both blank to return to the Home Archive.",
-                    color = SA.Muted,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
+        }
+    }
+}
+
+private enum class CoreTab(val label: String) { GENERAL("GENERAL"), OPERATOR("OPERATOR"), NETLINK("NETLINK"), CREDITS("CREDITS") }
+
+@Composable
+private fun CoreTabs(selected: CoreTab, onSelect: (CoreTab) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth()) {
+        CoreTab.entries.forEach { t ->
+            val on = t == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .selectable(selected = on, role = Role.Tab, onClick = { onSelect(t) })
+                    .background(if (on) SA.Panel else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Mono(t.label, color = if (on) SA.Text else SA.Muted, spacing = 0.8.sp, weight = FontWeight.Medium, maxLines = 1)
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(if (on) 2.dp else 1.dp)
+                        .background(if (on) SA.Accent else SA.Line)
                 )
             }
         }
+    }
+}
 
-        SourcesSection(sources, onSourceEnabled, onSourceRemove, onSourceEdit, onAddSource)
-
-        Panel("VISOR SKIN") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThemeId.entries.forEach { t ->
-                    ThemeTile(t, selected = SA.theme == t, modifier = Modifier.weight(1f)) { onTheme(t) }
-                }
-            }
-        }
-
-        Panel("AUTO-PATCH") {
-            SettingRow("Auto-Patch Protocol", "Modules patch themselves in the background") {
-                SaSwitch(autoPatch, onAutoPatch, "Auto-Patch Protocol")
-            }
-            Divider()
-            SettingRow("Patch Roster", rosterSummary) {
-                SaButton("CONFIGURE", onOpenRoster, style = BtnStyle.OutlineLight)
-            }
-        }
-
-        Panel("DOWNLOADS & ALERTS") {
-            SettingRow("Wi-Fi only downloads", "Large downloads wait until you're on Wi-Fi. You can still tap DOWNLOAD ANYWAY on any one of them.") {
-                SaSwitch(wifiOnly, onWifiOnly, "Wi-Fi only downloads")
-            }
-            Divider()
-            SettingRow("Screenshots on Wi-Fi only", "F-Droid screenshots are separate image downloads. Turn off to always load them.") {
-                SaSwitch(screenshotsWifiOnly, onScreenshotsWifiOnly, "Screenshots on Wi-Fi only")
-            }
-            Divider()
-            SettingRow("Update alerts", "With Auto-Patch off, get a notification when modules have updates. Nothing installs by itself.") {
-                SaSwitch(updateAlerts, onUpdateAlerts, "Update alerts")
-            }
-        }
-
-        VaultPanel(vault, onVaultTarget, onAutoSnapshot, onSnapshotNow, onRestore)
-
-        Panel("DEPLOYMENT CORE") {
-            SettingRow("Deploy Clearance", "Android asks once per source app") {
-                if (canInstall) {
-                    Mono("GRANTED", Modifier.borderBadge(SA.Installed), color = SA.Installed, spacing = 1.sp)
-                } else {
-                    SaButton("ALLOW", {
-                        ctx.startActivity(
-                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}"))
-                        )
-                    }, style = BtnStyle.OutlineAlert)
-                }
-            }
-            Divider()
-            SettingRow("Payload Cache", "Cached installers on this device") {
-                SaButton("PURGE", onClearCache, style = BtnStyle.OutlineAlert)
-            }
-        }
-
-        SaButton("COMMIT & SYNC", { onSave(username, token) }, Modifier.fillMaxWidth(), BtnStyle.Accent, height = 54.dp, glow = true)
-
-        Mono(
-            "STELLARITE APPS v${BuildConfig.VERSION_NAME} · TEST BUILD",
-            Modifier.fillMaxWidth(),
-            spacing = 1.4.sp,
-        )
+@Composable
+private fun StatusNote(text: String) {
+    Box(Modifier.fillMaxWidth().background(SA.Void).border(1.dp, SA.Line2).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Mono(text, spacing = 0.6.sp)
     }
 }
 

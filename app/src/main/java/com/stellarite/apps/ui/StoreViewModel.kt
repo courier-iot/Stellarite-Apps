@@ -1,5 +1,8 @@
 package com.stellarite.apps.ui
 
+import com.stellarite.apps.data.DeviceScan
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import android.app.Application
 import android.content.Context
 import android.os.Build
@@ -69,6 +72,8 @@ data class UiState(
     val pending: List<GhRepo> = emptyList(),
     val wifiOnly: Boolean = true,
     val screenshotsWifiOnly: Boolean = true,
+    val autoDetect: Boolean = true,
+    val scanning: Boolean = false,
     val updateAlerts: Boolean = true,
     val fdroidDetails: Map<String, FDroidDetailsState> = emptyMap(),
     val suggestedPrompt: SuggestedItem? = null,
@@ -102,6 +107,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             sources = prefs.sources,
             wifiOnly = prefs.wifiOnly,
             screenshotsWifiOnly = prefs.screenshotsWifiOnly,
+            autoDetect = prefs.autoDetect,
             updateAlerts = prefs.updateAlerts,
             vault = VaultUi(
                 target = prefs.backupTarget,
@@ -157,6 +163,9 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val result = catalog.load()
                 val extra = catalog.installedSuggestions().filter { x -> result.apps.none { it.repo.fullName == x.repo.fullName } }
+                if (prefs.autoDetect) {
+                    withContext(Dispatchers.Default) { DeviceScan.run(ctx, prefs, result.apps) }
+                }
                 val apps = (result.apps + extra)
                     .map { withLocalState(it) }
                     .sortedWith(
@@ -293,6 +302,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         }
         waiting.remove(key)
         if (jobs[key]?.isActive == true) return
+        if (!force && Cooldown.active(key)) return
         val safeName = key.replace('/', '_').replace(':', '_')
         val file = File(ctx.cacheDir, "apks/$safeName-${app.release.tagName}.apk")
         jobs[key] = viewModelScope.launch {
@@ -307,6 +317,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                 prefs.setPackage(key, pkg)
                 val result = Installer.install(ctx, file, app.repo.name)
                 setTransfer(key, null)
+                if (result == InstallResult.STARTED) Cooldown.start(key)
                 if (result == InstallResult.NEEDS_PERMISSION) {
                     file.delete()
                     _state.update {
@@ -352,6 +363,34 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(wifiOnly = on) }
         AutoPatch.sync(ctx, prefs)
         if (!on) resumeWaiting()
+    }
+
+    fun setAutoDetect(on: Boolean) {
+        prefs.autoDetect = on
+        _state.update { it.copy(autoDetect = on) }
+    }
+
+    /** Looks through the apps on this device and links the ones that match catalog entries. */
+    fun scanDevice() {
+        if (_state.value.scanning) return
+        _state.update { it.copy(scanning = true) }
+        viewModelScope.launch {
+            val found = try {
+                withContext(Dispatchers.Default) { DeviceScan.run(ctx, prefs, _state.value.apps) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(scanning = false, message = "Scan failed: ${e.message ?: "unknown error"}") }
+                return@launch
+            }
+            recheck()
+            val msg = when {
+                _state.value.apps.isEmpty() -> "Load the catalog first, then scan."
+                found.isEmpty() -> "Scan complete. Nothing new found on this device."
+                else -> "Found on this device: " + found.joinToString(", ")
+            }
+            _state.update { it.copy(scanning = false, message = msg) }
+        }
     }
 
     fun setScreenshotsWifiOnly(on: Boolean) {

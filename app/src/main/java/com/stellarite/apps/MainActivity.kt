@@ -295,6 +295,10 @@ private fun StellariteApp(vm: StoreViewModel) {
                     onScreenshotsWifiOnly = vm::setScreenshotsWifiOnly,
                     updateAlerts = state.updateAlerts,
                     onUpdateAlerts = vm::setUpdateAlerts,
+                    autoDetect = state.autoDetect,
+                    onAutoDetect = vm::setAutoDetect,
+                    scanning = state.scanning,
+                    onScan = vm::scanDevice,
                     sources = sourcesPanel,
                     onSourceEnabled = vm::setSourceEnabled,
                     onSourceRemove = vm::removeSource,
@@ -318,6 +322,7 @@ private fun StellariteApp(vm: StoreViewModel) {
                         vm.saveSettings(u, t)
                         tab = 0
                     },
+                    onSyncNow = vm::refresh,
                     onClearCache = vm::clearCache,
                 )
             }

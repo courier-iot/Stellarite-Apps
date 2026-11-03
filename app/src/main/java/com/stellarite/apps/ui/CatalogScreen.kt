@@ -299,6 +299,11 @@ private fun AppCard(app: StoreApp, transfer: Transfer?, onOpen: () -> Unit, onAc
 @Composable
 fun ActionButton(app: StoreApp, transfer: Transfer?, onAction: () -> Unit, modifier: Modifier = Modifier) {
     val m = modifier.widthIn(min = 88.dp)
+    val wait = Cooldown.left(app.repo.fullName)
+    if (wait > 0 && transfer == null) {
+        SaButton("WAIT ${wait}s", {}, m, BtnStyle.OutlineLight, enabled = false)
+        return
+    }
     when (transfer) {
         is Transfer.Downloading ->
             SaButton("${(transfer.progress * 100).toInt()}%", {}, m, BtnStyle.OutlineLight, enabled = false)

@@ -123,7 +123,10 @@ fun DetailScreen(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val size = formatSize(app.apk.size)
+                    val wait = Cooldown.left(app.repo.fullName)
                     when {
+                        wait > 0 && transfer == null ->
+                            SaButton("PLEASE WAIT · ${wait}s", {}, Modifier.fillMaxWidth(), BtnStyle.OutlineLight, height = 54.dp, enabled = false)
                         transfer is Transfer.WaitingWifi ->
                             SaButton("WAITING FOR WI-FI · DOWNLOAD ANYWAY", onInstall, Modifier.fillMaxWidth(), BtnStyle.Update, height = 54.dp, glow = true)
                         transfer is Transfer.Failed ->

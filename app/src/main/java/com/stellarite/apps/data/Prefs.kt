@@ -92,6 +92,11 @@ class Prefs(context: Context) {
         set(v) = sp.edit { putBoolean("wifiOnly", v) }
 
     /** Load F-Droid screenshots only on an unmetered connection (they are separate image downloads). */
+    /** Match apps already on the device to catalog entries whenever the catalog loads. */
+    var autoDetect: Boolean
+        get() = sp.getBoolean("autoDetect", true)
+        set(v) = sp.edit { putBoolean("autoDetect", v) }
+
     var screenshotsWifiOnly: Boolean
         get() = sp.getBoolean("screenshotsWifiOnly", true)
         set(v) = sp.edit { putBoolean("screenshotsWifiOnly", v) }
