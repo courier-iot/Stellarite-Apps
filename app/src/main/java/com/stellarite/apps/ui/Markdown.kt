@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -28,7 +30,9 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -42,9 +46,13 @@ sealed interface MdBlock {
     data class Item(val marker: String, val indent: Int, val text: String) : MdBlock
     data class Code(val text: String) : MdBlock
     data class Quote(val text: String) : MdBlock
-    data class Table(val rows: List<List<String>>) : MdBlock
+    /** rows[0] is the header row. Every row has exactly aligns.size cells. */
+    data class Table(val rows: List<List<String>>, val aligns: List<MdAlign>) : MdBlock
     data object Rule : MdBlock
 }
+
+/** Column alignment from the `|:---|:---:|---:|` line. None means the GitHub default. */
+enum class MdAlign { None, Start, Center, End }
 
 private val headingRe = Regex("""^(#{1,6})\s+(.*?)\s*#*\s*$""")
 private val itemRe = Regex("""^(\s*)([-*+]|\d+[.)])\s+(.*)$""")
@@ -101,15 +109,25 @@ fun parseMarkdown(source: String): List<MdBlock> {
             }
             t.contains('|') && i + 1 < lines.size && tableSepRe.matches(lines[i + 1].trim()) -> {
                 flush()
-                val rows = mutableListOf<List<String>>()
-                rows += splitRow(t)
+                val header = splitRow(t)
+                val aligns = splitRow(lines[i + 1].trim()).map { c ->
+                    when {
+                        c.startsWith(":") && c.endsWith(":") -> MdAlign.Center
+                        c.endsWith(":") -> MdAlign.End
+                        c.startsWith(":") -> MdAlign.Start
+                        else -> MdAlign.None
+                    }
+                }.take(header.size).let { it + List(header.size - it.size) { MdAlign.None } }
+                val rows = mutableListOf(header)
                 i += 2
                 while (i < lines.size && lines[i].contains('|') && lines[i].isNotBlank()) {
-                    rows += splitRow(lines[i].trim())
+                    // GitHub rule: extra cells are dropped, missing cells are empty.
+                    val r = splitRow(lines[i].trim()).take(header.size)
+                    rows += r + List(header.size - r.size) { "" }
                     i++
                 }
                 i-- // the loop increments again
-                out += MdBlock.Table(rows)
+                out += MdBlock.Table(rows, aligns)
             }
             itemRe.matches(raw) -> {
                 flush()
@@ -131,8 +149,28 @@ fun parseMarkdown(source: String): List<MdBlock> {
     return out
 }
 
-private fun splitRow(line: String): List<String> =
-    line.trim().trim('|').split('|').map { clean(it.trim()) }
+/** Splits a table line on '|', keeping escaped \| and pipes inside `code` as text. */
+private fun splitRow(line: String): List<String> {
+    var t = line.trim()
+    if (t.startsWith("|")) t = t.substring(1)
+    if (t.endsWith("|") && !t.endsWith("\\|")) t = t.dropLast(1)
+    val cells = mutableListOf<String>()
+    val cur = StringBuilder()
+    var inCode = false
+    var k = 0
+    while (k < t.length) {
+        val ch = t[k]
+        when {
+            ch == '\\' && k + 1 < t.length && t[k + 1] == '|' -> { cur.append('|'); k++ }
+            ch == '`' -> { inCode = !inCode; cur.append(ch) }
+            ch == '|' && !inCode -> { cells += clean(cur.toString().trim()); cur.clear() }
+            else -> cur.append(ch)
+        }
+        k++
+    }
+    cells += clean(cur.toString().trim())
+    return cells
+}
 
 /** Drops images, empty links and HTML tags from a line of prose. */
 private fun clean(s: String): String {
@@ -243,19 +281,106 @@ private fun Block(b: MdBlock, repoUrl: String) {
                 modifier = Modifier.padding(start = 10.dp),
             )
         }
-        is MdBlock.Table -> Box(
-            Modifier
-                .fillMaxWidth()
-                .border(1.dp, SA.Line2)
-                .horizontalScroll(rememberScrollState())
-                .padding(10.dp)
-        ) {
-            Text(
-                b.rows.joinToString("\n") { row -> row.joinToString("  │  ") },
-                color = SA.Text,
-                style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 18.sp),
-            )
-        }
+        is MdBlock.Table -> MdTable(b, repoUrl)
         MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(SA.Line))
+    }
+}
+
+
+private val linkTextRe = Regex("""\[([^\]]*)]\([^)]*\)""")
+
+/** Rough visible length of a cell: link targets and *, _, ` markers don't take up space. */
+private fun visibleLen(s: String): Int =
+    linkTextRe.replace(s, "$1").replace("*", "").replace("_", "").replace("`", "").length
+
+private const val CHAR_DP = 8f   // average width of one 14sp character
+private const val CELL_PAD = 10  // horizontal padding on each side of a cell, in dp
+
+/**
+ * A GitHub-style table: bordered cells, text wrapping inside each cell, a bold header row
+ * and striped body rows. Columns share the screen width in proportion to their content;
+ * if even the narrowest sensible layout is wider than the screen, the table scrolls sideways.
+ */
+@Composable
+private fun MdTable(b: MdBlock.Table, repoUrl: String) {
+    val cols = b.aligns.size
+    if (cols == 0) return
+    // Per column: the longest single word sets the narrowest width, the longest cell sets its share.
+    val stats = remember(b) {
+        List(cols) { c ->
+            val cells = b.rows.map { it[c] }
+            val word = cells.maxOf { cell -> cell.split(' ').maxOfOrNull { visibleLen(it) } ?: 0 }
+            val whole = cells.maxOf { visibleLen(it) }
+            word to whole
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val avail = maxWidth
+        val minW = stats.map { (word, _) -> (word * CHAR_DP + 2 * CELL_PAD).coerceIn(48f, 170f).dp }
+        val share = stats.map { (_, whole) -> whole.coerceIn(3, 40).toFloat() }
+        val minSum = minW.fold(0.dp) { a, w -> a + w }
+        val scroll = minSum > avail
+
+        val widths: List<Dp> = if (scroll) {
+            // Too wide for the screen: give each column a comfortable fixed width and scroll.
+            List(cols) { c -> maxOf(minW[c], (share[c] * CHAR_DP * 0.6f + 2 * CELL_PAD).coerceAtMost(240f).dp) }
+        } else {
+            // Fill the screen by share, but never below a column's minimum.
+            val w = MutableList(cols) { 0.dp }
+            val fixed = BooleanArray(cols)
+            repeat(cols) {
+                val left = avail - (0 until cols).filter { fixed[it] }.fold(0.dp) { a, c -> a + w[c] }
+                val total = (0 until cols).filter { !fixed[it] }.sumOf { share[it].toDouble() }.toFloat()
+                var changed = false
+                for (c in 0 until cols) if (!fixed[c]) {
+                    w[c] = left * (share[c] / total)
+                    if (w[c] < minW[c]) { w[c] = minW[c]; fixed[c] = true; changed = true }
+                }
+                if (!changed) return@repeat
+            }
+            w
+        }
+
+        Box(Modifier.fillMaxWidth().then(if (scroll) Modifier.horizontalScroll(rememberScrollState()) else Modifier)) {
+            Column(Modifier.border(0.5.dp, SA.Line2)) {
+                b.rows.forEachIndexed { r, row ->
+                    val header = r == 0
+                    val striped = !header && r % 2 == 0 // 2nd, 4th… body rows, like GitHub
+                    Row(
+                        Modifier
+                            .height(IntrinsicSize.Min)
+                            .background(if (striped) SA.PanelRaised else Color.Transparent)
+                    ) {
+                        row.forEachIndexed { c, cell ->
+                            val align = when (b.aligns[c]) {
+                                MdAlign.Start -> TextAlign.Start
+                                MdAlign.Center -> TextAlign.Center
+                                MdAlign.End -> TextAlign.End
+                                MdAlign.None -> if (header) TextAlign.Center else TextAlign.Start
+                            }
+                            Box(
+                                Modifier
+                                    .width(widths[c])
+                                    .fillMaxHeight()
+                                    .border(0.5.dp, SA.Line2)
+                                    .padding(horizontal = CELL_PAD.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    rich(cell, repoUrl),
+                                    color = SA.Text,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp,
+                                    fontWeight = if (header) FontWeight.SemiBold else null,
+                                    textAlign = align,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
