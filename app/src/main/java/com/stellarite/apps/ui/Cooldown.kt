@@ -11,7 +11,8 @@ import kotlinx.coroutines.delay
 
 /**
  * A short lock on an app's action button right after a download finishes, so repeated taps can't
- * start the same install twice. Held in memory only: it never needs to survive a restart.
+ * start the same install twice. It ends early as soon as the install is confirmed on the device.
+ * Held in memory only: it never needs to survive a restart.
  */
 object Cooldown {
     const val SECONDS = 30
@@ -20,6 +21,11 @@ object Cooldown {
 
     fun start(key: String) {
         until[key] = System.currentTimeMillis() + SECONDS * 1000L
+    }
+
+    /** Lifts the lock, e.g. once the new version is confirmed installed. */
+    fun clear(key: String) {
+        until.remove(key)
     }
 
     fun active(key: String): Boolean = (until[key] ?: 0L) > System.currentTimeMillis()

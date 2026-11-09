@@ -74,11 +74,21 @@ object Installer {
         )
     }
 
-    fun uninstall(ctx: Context, pkg: String) {
-        ctx.startActivity(
-            Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
+    /**
+     * Opens Android's own "Uninstall this app?" prompt. Needs REQUEST_DELETE_PACKAGES in the manifest,
+     * otherwise Android 9+ drops the request without showing anything. Returns false if no prompt opened.
+     */
+    fun uninstall(ctx: Context, pkg: String): Boolean {
+        if (installedVersion(ctx, pkg) == null) return false
+        return try {
+            ctx.startActivity(
+                Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun open(ctx: Context, pkg: String): Boolean {

@@ -203,6 +203,10 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
                 },
             )
         }
+        // The install is confirmed on the device, so the post-download lock has done its job.
+        val s = _state.value
+        s.apps.filter { it.state == AppState.INSTALLED }.forEach { Cooldown.clear(it.repo.fullName) }
+        s.suggested.filter { it.app?.state == AppState.INSTALLED }.forEach { Cooldown.clear(it.s.key) }
         refreshRestoreStatus()
         maybeAutoSnapshot()
     }

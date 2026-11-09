@@ -230,7 +230,12 @@ private fun StellariteApp(vm: StoreViewModel) {
                     },
                     onCancel = { vm.cancel(selectedApp) },
                     onOpenApp = { selectedApp.packageName?.let { Installer.open(ctx, it) } },
-                    onUninstall = { selectedApp.packageName?.let { Installer.uninstall(ctx, it) } },
+                    onUninstall = {
+                        val pkg = selectedApp.packageName
+                        if (pkg == null || !Installer.uninstall(ctx, pkg)) {
+                            vm.reportMessage("Couldn't open Android's uninstall prompt. Try Settings > Apps.")
+                        }
+                    },
                     onRetryReadme = { vm.loadReadme(selectedApp, force = true) },
                     fdroid = state.fdroidDetails[selectedApp.repo.fullName],
                     holdImages = state.screenshotsWifiOnly && (ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered,
