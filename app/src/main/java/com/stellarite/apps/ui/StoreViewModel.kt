@@ -11,6 +11,10 @@ import androidx.lifecycle.viewModelScope
 import com.stellarite.apps.data.AppState
 import com.stellarite.apps.data.ArchiveApp
 import com.stellarite.apps.data.Catalog
+import com.stellarite.apps.data.CatalogCache
+import com.stellarite.apps.data.CatalogResult
+import com.stellarite.apps.data.RateInfo
+import com.stellarite.apps.data.RateMeter
 import com.stellarite.apps.data.DeviceSnapshot
 import com.stellarite.apps.data.FDROID_PREFIX
 import com.stellarite.apps.data.FDroidClient
@@ -78,6 +82,12 @@ data class UiState(
     val fdroidDetails: Map<String, FDroidDetailsState> = emptyMap(),
     val suggestedPrompt: SuggestedItem? = null,
     val archives: List<ArchiveCard> = emptyList(),
+    /** When the list on screen was synced from GitHub (it may be the saved copy); 0 when never. */
+    val syncedAt: Long = 0L,
+    /** True while the list on screen is the saved copy because the latest sync failed. */
+    val showingSaved: Boolean = false,
+    /** True while the rate-limit check in Core is running. */
+    val checkingRate: Boolean = false,
 ) {
     /** Modules that are installed and on the latest release. */
     val upToDate: Int get() = apps.count { it.state == AppState.INSTALLED }
@@ -121,16 +131,44 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state: StateFlow<UiState> = _state
 
+    /** GitHub's hourly allowance, for the usage bar. */
+    val rate: StateFlow<RateInfo?> = RateMeter.state
+
     private val vaultRepo = Vault(client, prefs)
 
     val username: String get() = prefs.username
     val token: String get() = prefs.token
 
+    // Declared before init on purpose: init sets them, and a later initializer would reset them.
+    private var refreshJob: Job? = null
+    private var lastRefreshAt = 0L
+
     init {
         SA.theme = ThemeId.fromKey(prefs.theme)
+        RateMeter.init(ctx)
         AutoPatch.sync(ctx, prefs)
         loadArchiveCards()
-        refresh()
+        // Show the saved list at once. Only ask GitHub when it is older than the refresh interval,
+        // so reopening the store (even after Android closed it) doesn't spend the hourly limit again.
+        val saved = CatalogCache.load(ctx, prefs)
+        if (saved != null) {
+            lastRefreshAt = saved.savedAt
+            viewModelScope.launch {
+                try {
+                    show(saved.result, saved.savedAt, fromSaved = true)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The saved copy is only a head start; the sync below still runs.
+                }
+            }
+        }
+        if (saved == null || System.currentTimeMillis() - saved.savedAt >= REFRESH_INTERVAL_MS) refresh()
+    }
+
+    private companion object {
+        /** How old the list may get before coming back to the app syncs it again. Sync now always syncs. */
+        const val REFRESH_INTERVAL_MS = 15 * 60_000L
     }
 
     private fun sourceLabel(): String = when {
@@ -141,9 +179,6 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun tokenOrNull(): String? = prefs.token.ifBlank { null }
 
-    private var refreshJob: Job? = null
-    private var lastRefreshAt = 0L
-
     /**
      * Re-reads the catalog when the app comes back to the front after a while, so a repo or release
      * added in the meantime shows up without a manual sync. Spaced out to stay inside GitHub's
@@ -151,7 +186,7 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun refreshIfStale() {
         if (_state.value.loading) return
-        if (System.currentTimeMillis() - lastRefreshAt < 15 * 60_000L) return
+        if (System.currentTimeMillis() - lastRefreshAt < REFRESH_INTERVAL_MS) return
         refresh()
     }
 
@@ -162,32 +197,69 @@ class StoreViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(loading = true, error = null, source = sourceLabel()) }
             try {
                 val result = catalog.load()
-                val extra = catalog.installedSuggestions().filter { x -> result.apps.none { it.repo.fullName == x.repo.fullName } }
-                if (prefs.autoDetect) {
-                    withContext(Dispatchers.Default) { DeviceScan.run(ctx, prefs, result.apps) }
-                }
-                val apps = (result.apps + extra)
-                    .map { withLocalState(it) }
-                    .sortedWith(
-                        compareBy<StoreApp> { it.state != AppState.UPDATE_AVAILABLE }
-                            .thenBy { it.repo.name.lowercase() }
-                    )
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        apps = apps,
-                        readmes = emptyMap(),
-                        homeCount = result.homeCount,
-                        pending = result.pending,
-                        sourceCounts = result.counts,
-                        sourceErrors = result.errors,
-                    )
-                }
-                loadSuggested()
+                val now = System.currentTimeMillis()
+                CatalogCache.save(ctx, prefs, result, now)
+                show(result, now, fromSaved = false)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(loading = false, error = e.message ?: "Could not reach GitHub") }
+                // Whatever list is on screen (usually the saved copy) stays; the error explains why it is old.
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        error = e.message ?: "Could not reach GitHub",
+                        showingSaved = it.apps.isNotEmpty(),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Puts a catalog on screen, with install state read fresh from the device. */
+    private suspend fun show(result: CatalogResult, syncedAt: Long, fromSaved: Boolean) {
+        val extra = catalog.installedSuggestions().filter { x -> result.apps.none { it.repo.fullName == x.repo.fullName } }
+        if (prefs.autoDetect) {
+            withContext(Dispatchers.Default) { DeviceScan.run(ctx, prefs, result.apps) }
+        }
+        val apps = (result.apps + extra)
+            .map { withLocalState(it) }
+            .sortedWith(
+                compareBy<StoreApp> { it.state != AppState.UPDATE_AVAILABLE }
+                    .thenBy { it.repo.name.lowercase() }
+            )
+        _state.update {
+            if (fromSaved && !it.showingSaved && it.syncedAt > syncedAt) return@update it // a fresh sync already landed
+            it.copy(
+                // A saved list shown at start-up leaves the spinner of a sync that is still running.
+                loading = if (fromSaved) it.loading else false,
+                error = if (fromSaved) it.error else null,
+                // If the sync already failed, the list now on screen is the saved one.
+                showingSaved = if (fromSaved) it.error != null else false,
+                apps = apps,
+                readmes = if (fromSaved) it.readmes else emptyMap(),
+                homeCount = result.homeCount,
+                pending = result.pending,
+                sourceCounts = result.counts,
+                sourceErrors = result.errors,
+                syncedAt = syncedAt,
+            )
+        }
+        loadSuggested()
+    }
+
+    /** Asks GitHub how much of the hourly limit is used. The check itself is free. */
+    fun checkRateLimit() {
+        if (_state.value.checkingRate) return
+        _state.update { it.copy(checkingRate = true) }
+        viewModelScope.launch {
+            try {
+                client.checkRateLimit(tokenOrNull())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                reportMessage("Couldn't check the limit: ${e.message ?: "no connection"}")
+            } finally {
+                _state.update { it.copy(checkingRate = false) }
             }
         }
     }

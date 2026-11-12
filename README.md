@@ -51,7 +51,7 @@ The **CORE** tab holds every setting, in four tabs:
 | --- | --- |
 | **GENERAL** | Visor Skin (theme), Auto-Patch, Device Scan, Deploy Clearance, Payload Cache |
 | **OPERATOR** | Uplink (account and Access Key), Sources, Backup Vault, Commit & Sync |
-| **NETLINK** | Wi-Fi only downloads, screenshots on Wi-Fi, update alerts, link status |
+| **NETLINK** | Wi-Fi only downloads, screenshots on Wi-Fi, update alerts, GitHub limit bar, link status |
 | **CREDITS** | Who made it, the F-Droid notice, libraries used |
 
 Switches apply immediately. Only the Operator Handle and Access Key need **COMMIT & SYNC**.
@@ -77,7 +77,16 @@ Sources can be switched off or removed. They are included in Backup Vault snapsh
 - Another GitHub handle: that account's public releases.
 - An Access Key (a GitHub token): your own repos, including private ones.
 
-GitHub limits anonymous requests to 60 per hour per device. A key raises that limit. The key is only ever sent to `api.github.com`.
+GitHub limits anonymous requests to 60 per hour per internet connection (IP address), shared with every other app on the same Wi-Fi or mobile network. A key gives you your own 5,000 per hour. The key is only ever sent to `api.github.com`.
+
+**HOW TO GET AN ACCESS KEY** (folds open under the key field) walks through making a fine-grained token on GitHub: Settings > Developer settings > Personal access tokens > Fine-grained tokens > Generate new token. "Public repositories" is enough for the higher limit; private repos and Backup Vault need "All repositories" with Contents read and write. OPEN GITHUB goes straight to the token page.
+
+### Saved catalog and the GitHub limit
+Each sync costs about one request per repo, plus one. To save requests, the last good catalog is kept on the phone:
+- Opening the store shows the saved list at once. It only asks GitHub again when the list is more than 15 minutes old, even if Android closed the store in the background. Pull it fresh any time with the sync button or SYNC NOW.
+- Auto-Patch's background check saves its list too, so the next open can reuse it.
+- If a sync fails (no connection, or the limit is used up), the saved list stays on screen with SAVED LIST and the time it was synced. Installs and updates from it still work, because APK downloads don't count against the limit.
+- When the limit is used up, the error says when it resets.
 
 ### How apps get into the catalog
 A repo appears when it is not a fork, is not archived, and its **latest release** has an `.apk` file attached. Pre-releases and drafts are skipped. If a release has several APKs, one named `universal` or `release` is preferred.
@@ -96,6 +105,7 @@ A background job runs about every 6 hours. Installs go through Android's Package
 - **Wi-Fi only downloads** (on by default): installers and archive indexes wait for an unmetered connection. A held download shows WAITING FOR WI-FI with a **DOWNLOAD ANYWAY** button, and starts by itself when Wi-Fi returns.
 - **Screenshots on Wi-Fi only** (on by default): F-Droid screenshots are separate image downloads. Switch it off to always load them.
 - **Update alerts** (on by default): with Auto-Patch off, one notification lists the updates, once per set of updates rather than at every check.
+- **GitHub limit** shows how much of the hourly limit is used, as a percentage bar (cyan, amber from 75%, red at 100%), with the reset time. Every GitHub answer updates it; CHECK LIMIT asks GitHub directly, which is free. Without a key the count covers your whole connection, so it can rise while the store is closed. The catalog shows a LIMIT chip once 75% is used.
 - **Link status** shows your connection type and whether an Access Key is set. SYNC NOW reloads the catalog.
 
 ### Device Scan

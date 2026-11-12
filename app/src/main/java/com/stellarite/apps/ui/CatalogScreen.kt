@@ -48,6 +48,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.stellarite.apps.data.AppState
+import com.stellarite.apps.data.RateInfo
+import com.stellarite.apps.data.RateMeter
 import com.stellarite.apps.data.StoreApp
 import com.stellarite.apps.data.Transfer
 import com.stellarite.apps.data.displayRepo
@@ -68,6 +70,7 @@ fun formatSize(bytes: Long): String =
 @Composable
 fun CatalogScreen(
     state: UiState,
+    rate: RateInfo?,
     onRefresh: () -> Unit,
     onQuery: (String) -> Unit,
     onFilter: (Filter) -> Unit,
@@ -122,12 +125,18 @@ fun CatalogScreen(
                     }
                     val text = when {
                         state.loading -> "SYNCING…"
+                        state.showingSaved && state.syncedAt > 0 ->
+                            "SAVED LIST · ${RateMeter.clockTime(state.syncedAt).uppercase(Locale.US)}"
                         else -> "SYNCED · ${state.upToDate}/${state.apps.size} MODULES"
                     }
-                    Mono(if (SA.isSteam) text.lowercase().replaceFirstChar { it.uppercase() } else text, spacing = 1.sp, maxLines = 1)
+                    Mono(
+                        if (SA.isSteam) text.lowercase().replaceFirstChar { it.uppercase() } else text,
+                        Modifier.weight(1f, fill = false), spacing = 1.sp, maxLines = 1,
+                    )
                     if (!SA.isSteam && updates > 0 && !state.loading) {
                         StatusChip("● $updates UPDATE${if (updates == 1) "" else "S"}", SA.Update)
                     }
+                    RateChip(rate)
                 }
                 if (state.loading) {
                     LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = SA.Accent, trackColor = SA.Line)
@@ -169,6 +178,12 @@ fun CatalogScreen(
                 ) {
                     Mono("UPLINK FAILED", color = SA.Alert, size = 12.sp, spacing = 1.6.sp)
                     Text(state.error, color = SA.Text, fontSize = 14.sp)
+                    if (state.showingSaved && state.syncedAt > 0) {
+                        Text(
+                            "Showing the list saved at ${RateMeter.clockTime(state.syncedAt)}. Installs and updates from it still work.",
+                            color = SA.Muted, fontSize = 13.sp, lineHeight = 18.sp,
+                        )
+                    }
                     SaButton("RETRY", onRefresh, style = BtnStyle.OutlineAlert)
                 }
             }

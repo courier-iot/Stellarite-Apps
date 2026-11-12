@@ -9,12 +9,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.stellarite.apps.data.Catalog
+import com.stellarite.apps.data.CatalogCache
 import com.stellarite.apps.data.FDroidClient
 import com.stellarite.apps.data.GitHubClient
 import com.stellarite.apps.data.InstallResult
 import com.stellarite.apps.data.Installer
 import com.stellarite.apps.data.Prefs
 import com.stellarite.apps.data.RateLimitException
+import com.stellarite.apps.data.RateMeter
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -26,16 +28,20 @@ class PatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
         val ctx = applicationContext
         val prefs = Prefs(ctx)
         if (!prefs.backgroundActive) return Result.success()
+        RateMeter.init(ctx)
         val token = prefs.token.ifBlank { null }
         val client = GitHubClient()
 
         return try {
             val catalog = Catalog(ctx, client, FDroidClient.withPrefs(prefs), prefs)
+            val loaded = if (prefs.autoPatchActive) catalog.load(withSuggested = true) else catalog.load()
+            // The store shows this list next time it opens, instead of asking GitHub again.
+            CatalogCache.save(ctx, prefs, loaded)
             val found = if (prefs.autoPatchActive) {
-                catalog.load(withSuggested = true).apps
+                loaded.apps
             } else {
                 // Alerts only: no large index downloads, just a cheap look at installed suggestions.
-                val base = catalog.load().apps
+                val base = loaded.apps
                 base + catalog.installedSuggestions().filter { s -> base.none { it.repo.fullName == s.repo.fullName } }
             }
             val needAlert = mutableListOf<String>()

@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
 private fun StellariteApp(vm: StoreViewModel) {
     val ctx = LocalContext.current
     val state by vm.state.collectAsStateWithLifecycle()
+    val rate by vm.rate.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var showRoster by remember { mutableStateOf(false) }
@@ -244,6 +245,7 @@ private fun StellariteApp(vm: StoreViewModel) {
             } else if (tab == 0) {
                 CatalogScreen(
                     state = state,
+                    rate = rate,
                     onRefresh = vm::refresh,
                     onQuery = vm::setQuery,
                     onFilter = vm::setFilter,
@@ -329,6 +331,9 @@ private fun StellariteApp(vm: StoreViewModel) {
                     },
                     onSyncNow = vm::refresh,
                     onClearCache = vm::clearCache,
+                    rate = rate,
+                    checkingRate = state.checkingRate,
+                    onCheckRate = vm::checkRateLimit,
                 )
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(16.dp))

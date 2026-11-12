@@ -24,8 +24,15 @@ import java.security.MessageDigest
 import java.util.Base64
 import kotlin.coroutines.coroutineContext
 
-class RateLimitException :
-    IOException("GitHub rate limit reached. Add a personal access token in Settings.")
+/** GitHub's hourly allowance is used up. The message says when it refills, when that is known. */
+class RateLimitException(val resetAt: Long = RateMeter.current?.resetAt ?: 0L) : IOException(
+    if (resetAt > System.currentTimeMillis()) {
+        "GitHub's hourly limit is used up. It resets at ${RateMeter.clockTime(resetAt)}. " +
+            "An Access Key (Core > Operator) raises the limit."
+    } else {
+        "GitHub's hourly limit is used up. Try again in a few minutes, or add an Access Key in Core > Operator."
+    }
+)
 
 /** A problem with the Access Key or backup repo that the user can fix; the message says how. */
 class BackupException(message: String) : IOException(message)
@@ -35,7 +42,18 @@ class StaleFileException : IOException("The snapshot changed on GitHub.")
 
 data class RemoteFile(val text: String, val sha: String)
 
-class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
+class GitHubClient(private val http: OkHttpClient = defaultHttp()) {
+
+    companion object {
+        /** Reads the rate-limit headers of every GitHub API answer into [RateMeter]. */
+        fun defaultHttp(): OkHttpClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val resp = chain.proceed(chain.request())
+                if (chain.request().url.host == "api.github.com") RateMeter.record(resp)
+                resp
+            }
+            .build()
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -213,6 +231,22 @@ class GitHubClient(private val http: OkHttpClient = OkHttpClient()) {
         val release = found ?: return null
         val apk = pickApk(release) ?: return null
         return release to apk
+    }
+
+    /**
+     * Asks GitHub how much of the hourly allowance is left. This one call does not count against the limit.
+     * The reading is stored in [RateMeter].
+     */
+    suspend fun checkRateLimit(token: String?): RateInfo = withContext(Dispatchers.IO) {
+        http.newCall(request("https://api.github.com/rate_limit", token)).execute().use { resp ->
+            if (resp.code == 401) throw IOException("GitHub rejected the Access Key.")
+            if (!resp.isSuccessful) throw IOException("GitHub error ${resp.code}")
+            val core = json.parseToJsonElement(resp.body!!.string()).jsonObject["resources"]
+                ?.jsonObject?.get("core")?.jsonObject ?: throw IOException("Unexpected reply from GitHub")
+            fun num(k: String) = core[k]?.jsonPrimitive?.content?.toLongOrNull() ?: throw IOException("Unexpected reply from GitHub")
+            RateInfo(num("limit").toInt(), num("remaining").toInt(), num("reset") * 1000L, System.currentTimeMillis())
+                .also { RateMeter.set(it, exact = true) }
+        }
     }
 
     // ---- Backup Vault -------------------------------------------------------------------------

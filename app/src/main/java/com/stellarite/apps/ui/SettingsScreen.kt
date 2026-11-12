@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.stellarite.apps.BuildConfig
 import com.stellarite.apps.Config
+import com.stellarite.apps.data.RateInfo
 import com.stellarite.apps.data.Source
 import com.stellarite.apps.data.SourceType
 import com.stellarite.apps.ui.theme.SA
@@ -87,6 +88,9 @@ fun SettingsScreen(
     onSave: (username: String, token: String) -> Unit,
     onClearCache: () -> Unit,
     onSyncNow: () -> Unit,
+    rate: RateInfo?,
+    checkingRate: Boolean,
+    onCheckRate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -188,6 +192,7 @@ fun SettingsScreen(
                             lineHeight = 18.sp,
                         )
                     }
+                    KeyHowTo()
                 }
                 SourcesSection(sources, onSourceEnabled, onSourceRemove, onSourceEdit, onAddSource)
                 VaultPanel(vault, onVaultTarget, onAutoSnapshot, onSnapshotNow, onRestore)
@@ -213,6 +218,9 @@ fun SettingsScreen(
                                 (if (updateAlerts && !autoPatch) " · ALERTS ARE ACTIVE" else if (!updateAlerts) " · ALERTS ARE OFF" else "") +
                                 " · CHECKED ABOUT EVERY 6 HOURS"
                         )
+                    }
+                    Panel("GITHUB LIMIT") {
+                        RateBar(rate, checkingRate, token.isNotBlank(), onCheckRate)
                     }
                     Panel("LINK STATUS") {
                         StatusNote(
@@ -258,6 +266,66 @@ fun SettingsScreen(
                     }
                     Mono("STELLARITE APPS v${BuildConfig.VERSION_NAME}", Modifier.fillMaxWidth(), spacing = 1.4.sp)
                 }
+            }
+        }
+    }
+}
+
+/** Folding guide under the Access Key field: how to make a key on GitHub. */
+@Composable
+private fun KeyHowTo() {
+    val ctx = LocalContext.current
+    var open by rememberSaveable { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SA.Void, SA.controlShape)
+            .border(1.dp, SA.Line, SA.controlShape),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .clickable(role = Role.Button, onClick = { open = !open })
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Mono("HOW TO GET AN ACCESS KEY", Modifier.weight(1f), color = SA.Accent, spacing = 1.2.sp, weight = FontWeight.SemiBold)
+            Mono(if (open) "▴" else "▾", color = SA.Accent, size = 13.sp)
+        }
+        if (open) {
+            Column(
+                Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    "Sign in on github.com and open Settings > Developer settings > Personal access tokens > Fine-grained tokens. The button below goes straight there.",
+                    "Tap Generate new token, name it \"Stellarite\" and pick an expiry date.",
+                    "Repository access: \"Public repositories\" is enough for the higher limit. For private repos and Backup Vault, choose \"All repositories\" and set Contents to Read and write.",
+                    "Generate it, copy the key (GitHub only shows it once), paste it above and tap COMMIT & SYNC.",
+                ).forEachIndexed { i, step ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Mono("${i + 1}", color = SA.Accent, size = 12.sp, weight = FontWeight.SemiBold)
+                        Text(step, color = SA.Muted, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                }
+                Text(
+                    "The key stays encrypted on this phone and is only sent to GitHub. With it you get 5,000 requests an hour of your own. When it expires, make a new one the same way.",
+                    color = SA.Muted, fontSize = 13.sp, lineHeight = 18.sp,
+                )
+                SaButton(
+                    "OPEN GITHUB",
+                    {
+                        try {
+                            ctx.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/personal-access-tokens/new"))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } catch (_: Exception) {
+                        }
+                    },
+                    Modifier.fillMaxWidth(), BtnStyle.OutlineLight, height = 48.dp,
+                )
             }
         }
     }

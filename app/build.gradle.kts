@@ -14,8 +14,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // The release workflow passes these from the git tag (v1.2.0 -> 1.2.0) and the run number.
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 114
-        versionName = (project.findProperty("versionName") as String?) ?: "1.1.4"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 115
+        versionName = (project.findProperty("versionName") as String?) ?: "1.1.5"
     }
 
     // Updates only install over apps signed with the same key, so releases always use one fixed keystore,
